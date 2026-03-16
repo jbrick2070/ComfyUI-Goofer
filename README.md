@@ -112,7 +112,7 @@ GooferBatchVideo                                  │
 |------|-------------|
 | **GooferInit** | Sets global config: output path, upscale mode, seed |
 | **GooferGoofFetch** | Picks a random film from 424 titles, fetches goofs from IMDb via Cinemagoer + direct HTTP fallback. Seed-diversified so every run draws a fresh subset from the full goof pool |
-| **GooferSanitizer** | Strips copyrighted character names, actor names, studio names, brand names, and franchise references from all goof text before it reaches any AI model |
+| **GooferSanitizer** *(Copyright Cleaner)* | Strips copyrighted character names, actor names, studio names, brand names, and franchise references from all goof text before it reaches any AI model |
 | **GooferPromptGen** | Converts sanitized goof descriptions into cinematic LTX-2 video prompts using category-aware templates (continuity errors → observational style, factual errors → documentary style, etc.) |
 | **GooferBatchVideo** | Feeds each prompt to LTX-Video and renders one video clip per goof. Configurable resolution, frame count, and guidance strength per clip |
 | **GooferBackgroundMusic** | Generates a film score with Meta MusicGen 3. Prompt is derived from actual goof keywords (explosions → percussive bass, chases → driving rhythm, basketball → upbeat brass, etc.) plus Flan-T5-small genre/mood inference from the film's plot. Falls back to additive-synthesis chord progression if MusicGen is unavailable |
@@ -140,7 +140,7 @@ To add your own films, edit `_RANDOM_MOVIE_POOL` in `goofer_goof_fetch.py`:
 
 ## Copyright Safety
 
-Goofer is designed to keep copyrighted names out of AI-generated video prompts. The **GooferSanitizer** node runs several passes before any text reaches LTX-Video or MusicGen:
+Goofer is designed to keep copyrighted names out of AI-generated video prompts. The **Copyright Cleaner** (GooferSanitizer) node runs several passes before any text reaches LTX-Video or MusicGen:
 
 - Franchise names replaced with generic descriptions (`"James Bond"` → `"a spy thriller"`)
 - Movie title as character name → `"the character"`

@@ -77,6 +77,50 @@ _FRANCHISE_REPLACEMENTS = {
 }
 
 
+# -- NSFW / Explicit Content Filter --------------------------------------------
+# Goofs matching any of these are DROPPED before prompt generation.
+# No explicit sexual content, nudity, or extreme gore will reach LTX-Video.
+
+_NSFW_TERMS = frozenset({
+    # nudity / body (unambiguous)
+    "nude", "nudity", "naked", "topless", "bottomless",
+    "nipple", "nipples", "genitals", "pubic",
+    "penis", "vagina", "vulva", "scrotum",
+    # sexual acts / explicit
+    "sex scene", "sex act", "sexual intercourse", "sexual content",
+    "orgasm", "masturbat", "erection", "pornograph", "pornographic",
+    "porn", "xxx", "explicit content", "adult content",
+    "fornicate", "copulat", "ejaculat",
+    # explicit slang
+    "fuck", "fucking", "fucked", "motherfuck",
+    "cock", "cunt", "pussy", "dick", "boner",
+    "whore", "slut",
+    # extreme gore / violence
+    "decapitat", "dismemberment", "eviscer", "disembowel",
+    # child safety — absolute block
+    "underage", "minor sexual", "child sexual", "lolita",
+})
+
+# Phrase-level regex patterns for context-sensitive explicit content
+_NSFW_PATTERNS = [
+    re.compile(r'\bbare\s+(breast|chest|body|buttock)\b',         re.I),
+    re.compile(r'\bfully?\s+(naked|nude|exposed)\b',               re.I),
+    re.compile(r'\bin\s+the\s+(nude|buff|raw)\b',                  re.I),
+    re.compile(r'\b(making love|love scene with explicit)\b',      re.I),
+    re.compile(r'\bstrip(s|ped|ping)?\s+(naked|nude|down|off)\b',  re.I),
+    re.compile(r'\bsex(ual)?\s+(scene|content|act|encounter)\b',   re.I),
+    re.compile(r'\bbreast(s)?\s+(?:are\s+)?(?:visible|exposed|shown|bare)\b', re.I),
+    re.compile(r'\bgenitalia\b',                                   re.I),
+    re.compile(r'\b(pubic|body)\s+hair\b',                         re.I),
+]
+
+# Borderline terms that trigger the AI secondary check
+_NSFW_BORDERLINE = frozenset({
+    "breast", "bare", "strip", "exposed", "reveal", "undress",
+    "shower", "bath", "intimate", "erotic", "sensual",
+    "rape", "assault", "fondle", "grope",
+})
+
 class GooferSanitizer:
     """Strips copyrighted terms, names, PII from goof descriptions."""
 
@@ -110,7 +154,7 @@ class GooferSanitizer:
         }
 
     def sanitize(self, goofs_data, movie_data,
-                 enabled=True, custom_blocklist=""):
+                 enabled=True, custom_blocklist="", nsfw_ai_check=True):
         if not enabled:
             log.info("[Sanitizer] disabled â€” passing goofs through unchanged")
             return (goofs_data,)
@@ -131,7 +175,19 @@ class GooferSanitizer:
         sanitized = []
         for goof in goofs_data:
             text = goof["description"]
-            category = goof["category"]
+            category = goof["category"]            # Step 0: NSFW filter — drop explicit goofs before any AI sees them
+            nsfw_hit, nsfw_reason = self._is_nsfw(text)
+            if nsfw_hit:
+                log.warning("[Sanitizer] NSFW goof DROPPED (%s): '%s'",
+                            nsfw_reason, text[:80])
+                continue
+            # AI secondary check for borderline terms
+            if nsfw_ai_check and any(b in text.lower() for b in _NSFW_BORDERLINE):
+                if self._is_nsfw_ai(text):
+                    log.warning("[Sanitizer] NSFW goof DROPPED (AI judge): '%s'",
+                                text[:80])
+                    continue
+
 
             # Step 1: Strip franchise names (longest first to avoid partial matches)
             if strip_franchises:
@@ -307,6 +363,42 @@ class GooferSanitizer:
             _name_replacer, text
         )
         return text
+    def _is_nsfw(self, text: str):
+        """Keyword + pattern check. Returns (True, reason) if explicit content detected."""
+        lower = text.lower()
+        for term in _NSFW_TERMS:
+            if term in lower:
+                return True, f"keyword:{term}"
+        for pat in _NSFW_PATTERNS:
+            m = pat.search(text)
+            if m:
+                return True, f"pattern:{m.group(0)}"
+        return False, ""
+
+    def _is_nsfw_ai(self, text: str) -> bool:
+        """Flan-T5 secondary NSFW check for borderline text.
+        Returns True if AI judges the content as NOT appropriate for all ages."""
+        try:
+            from .goofer_background_music import _get_flan
+            import torch
+            model, tok = _get_flan()
+            if model is None:
+                return False
+            prompt = (
+                "Is the following film description appropriate for all audiences "
+                "and free from sexual, nude, or explicit content? "
+                "Answer only 'yes' or 'no'.\n\nDescription: " + text[:250]
+            )
+            inputs = tok(prompt, return_tensors="pt", truncation=True, max_length=300)
+            with torch.no_grad():
+                out = model.generate(**inputs, max_new_tokens=5, num_beams=2)
+            answer = tok.decode(out[0], skip_special_tokens=True).strip().lower()
+            log.debug("[Sanitizer] AI NSFW check ? '%s' for: '%s'", answer, text[:50])
+            return answer.startswith("no")
+        except Exception as exc:
+            log.debug("[Sanitizer] AI NSFW check unavailable: %s", exc)
+            return False
+
 
     def _strip_pii(self, text):
         """Remove emails, phone numbers, URLs, SSN-like patterns."""

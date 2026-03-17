@@ -222,6 +222,22 @@ Run Goofer as a live generative broadcast â€” each output video auto-loads into 
 
 ---
 
+---
+
+## Content Policy — No NSFW / Explicit Content
+
+ComfyUI-Goofer includes a mandatory two-stage explicit content filter built into the **Copyright Cleaner** (GooferSanitizer) node. It runs on every goof before any text reaches LTX-Video or MusicGen.
+
+**Stage 1 — Keyword & Pattern Block (always on)**
+Any goof containing explicit sexual terms, nudity references, graphic gore, or child-safety violations is silently dropped and logged. It never reaches the prompt generator.
+
+**Stage 2 — AI Judge (Flan-T5, default on)**
+Borderline goofs containing words like "bare", "intimate", "strip", or "shower" are passed to Flan-T5-small with the instruction: *"Is this description appropriate for all audiences and free from sexual or explicit content?"* If the answer is "no", the goof is dropped.
+
+This filter cannot be disabled from the workflow UI. The only override is editing the source directly, which you should not do unless you are using Goofer with fully public-domain films in a verified adult-only context compliant with all applicable laws.
+
+**Goofer is intended for general audiences. Do not attempt to circumvent this filter.**
+
 ## Requirements
 
 ```

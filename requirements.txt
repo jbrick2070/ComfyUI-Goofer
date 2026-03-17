@@ -9,8 +9,8 @@ Pillow>=10.0.0            # CPU frame generation (already in ComfyUI)
 opencv-python>=4.8.0      # Optional: denoise/frame prep (graceful fallback)
 
 # Prompt generation (Phi-3-mini mode) — models auto-download on first use
-transformers>=4.40.0      # Phi-3-mini-4k-instruct + Flan-T5-small + MusicGen
-accelerate>=0.26.0        # Required for device_map="auto" (Phi-3-mini float16)
+transformers>=5.0.0       # Phi-3-mini-4k-instruct + MusicGen (native Phi-3 support)
+accelerate>=0.26.0        # Required for Phi-3-mini float16 loading
 
 # Models downloaded automatically — no manual steps needed:
 #   microsoft/Phi-3-mini-4k-instruct  ~4 GB  (AI prompt generation + genre/mood)

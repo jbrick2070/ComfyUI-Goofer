@@ -1,18 +1,18 @@
-﻿"""
-GooferProceduralClip â€” Cinematic procedural motion graphics from goof data.
+"""
+GooferProceduralClip — Cinematic procedural motion graphics from goof data.
 
 Generates animated frames using PIL/Pillow with stylized aesthetics.
-No GPU required â€” pure CPU frame generation with cinematic post-processing.
+No GPU required — pure CPU frame generation with cinematic post-processing.
 
 Forked from DMM_ProceduralClip by Jeffrey A. Brick.
 Adapted for movie goof visualization instead of weather/seismic data.
 
 Styles:
-  goof_neon      â€” dark bg, neon grid, film reel silhouettes, goof readouts,
+  goof_neon      — dark bg, neon grid, film reel silhouettes, goof readouts,
                    chromatic aberration, film grain, bloom, animated gauges
-  goof_minimal   â€” clean dark panels, typography-focused, subtle grain,
+  goof_minimal   — clean dark panels, typography-focused, subtle grain,
                    breathing dividers, goof category fade transitions
-  goof_retro     â€” green-on-black terminal / hacker aesthetic,
+  goof_retro     — green-on-black terminal / hacker aesthetic,
                    CRT warp, phosphor bloom, flicker, "GOOF DETECTED" readout
 
 Parses goof descriptions and movie metadata to render animated overlays
@@ -34,7 +34,7 @@ import torch
 log = logging.getLogger("Goofer.ProceduralClip")
 
 
-# â”€â”€ Color palettes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Color palettes ────────────────────────────────────────────────────
 NEON = {
     "bg":       (10, 10, 26),
     "grid":     (25, 25, 60),
@@ -51,7 +51,7 @@ NEON = {
     "cool":     (60, 160, 255),
 }
 
-# â”€â”€ Category colors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Category colors ───────────────────────────────────────────────────
 _CAT_COLORS = {
     "Continuity":         NEON["cyan"],
     "Factual Error":      NEON["amber"],
@@ -67,7 +67,7 @@ _CAT_COLORS = {
 }
 
 
-# â”€â”€ Helpers (from DMM_ProceduralClip) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Helpers (from DMM_ProceduralClip) ─────────────────────────────────
 def _font(size: int):
     """Load a monospace font with cross-platform fallbacks."""
     from PIL import ImageFont
@@ -100,7 +100,7 @@ def _typewriter(text: str, progress: float) -> str:
     return text[:n]
 
 
-# â”€â”€ AI goof labeler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── AI goof labeler ───────────────────────────────────────────────────
 # Produces 4-word summaries using a transformers pipeline (T5-small,
 # ~240 MB, downloaded once to the HuggingFace cache on first run).
 # Falls back to smart keyword extraction if the model is unavailable.
@@ -137,7 +137,7 @@ def _get_summarizer():
     if _SUMMARIZER is not None:
         return _SUMMARIZER
     if _SUMMARIZER_READY is False and _SUMMARIZER is None:
-        # first-ever call â€” try to load
+        # first-ever call — try to load
         try:
             from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
             import torch
@@ -161,7 +161,7 @@ def _get_summarizer():
             log.info("[ProceduralClip] Summarizer ready")
         except Exception as e:
             log.warning("[ProceduralClip] LLM summarizer unavailable (%s) "
-                        "â€” using keyword extraction", e)
+                        "— using keyword extraction", e)
             _SUMMARIZER_READY = None   # None = permanently failed, skip retry
     return _SUMMARIZER
 
@@ -203,7 +203,7 @@ def _ai_label(text: str, max_words: int = 4) -> str:
                 label = " ".join(words[:max_words])
                 if len(words) > max_words:
                     label += "..."
-                log.debug("[ProceduralClip] AI label: '%s' â†’ '%s'", text[:40], label)
+                log.debug("[ProceduralClip] AI label: '%s' → '%s'", text[:40], label)
                 return label
         except Exception as e:
             log.debug("[ProceduralClip] Summarizer inference failed: %s", e)
@@ -277,7 +277,7 @@ def _spring_overshoot(t, damping=5.0, freq=8.0):
     return 1.0 - math.exp(-damping * t) * math.cos(freq * t)
 
 
-# â”€â”€ Cellular Automata â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Cellular Automata ─────────────────────────────────────────────────
 class _CellularAutomata:
     def __init__(self, cols, rows, seed=42):
         rng = np.random.RandomState(seed)
@@ -311,7 +311,7 @@ class _CellularAutomata:
         return overlay
 
 
-# â”€â”€ Mandelbrot border accent â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Mandelbrot border accent ──────────────────────────────────────────
 def _mandelbrot_line(y_norm, x_start, x_end, steps=80, max_iter=20):
     points = []
     cy = (y_norm - 0.5) * 2.5
@@ -330,7 +330,7 @@ def _mandelbrot_line(y_norm, x_start, x_end, steps=80, max_iter=20):
     return points
 
 
-# â”€â”€ Post-processing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Post-processing ───────────────────────────────────────────────────
 def _apply_vignette(img_arr, strength=0.4):
     h, w = img_arr.shape[:2]
     cy, cx = h / 2.0, w / 2.0
@@ -377,9 +377,9 @@ def _apply_bloom(img_arr, threshold=200, radius=8, intensity=0.3):
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
-# â”€â”€ Film reel decoration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Film reel decoration ──────────────────────────────────────────────
 def _draw_film_sprockets(draw, w, h, frame, fps):
-    """Draw film strip sprocket holes along edges â€” movie theme."""
+    """Draw film strip sprocket holes along edges — movie theme."""
     sprocket_h = max(4, int(h * 0.025))
     sprocket_w = max(6, int(w * 0.012))
     gap = max(12, int(h * 0.06))
@@ -410,9 +410,9 @@ def _draw_film_sprockets(draw, w, h, frame, fps):
         )
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════
 #  Node
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ══════════════════════════════════════════════════════════════════════
 class GooferProceduralClip:
     """Generate cinematic procedural goof-visualization motion graphics."""
 
@@ -431,7 +431,7 @@ class GooferProceduralClip:
             },
             "optional": {
                 "music": ("AUDIO", {
-                    "tooltip": "Background music from GooferBackgroundMusic â€” "
+                    "tooltip": "Background music from GooferBackgroundMusic — "
                                "trimmed/looped to match clip duration automatically."
                 }),
                 "music_duration": ("FLOAT", {
@@ -449,9 +449,10 @@ class GooferProceduralClip:
 
     def generate(self, config, movie_data, goofs_data,
                  width, height, duration_sec, style, music=None, music_duration=0.0):
-        fps = 25  # hardcoded - must match LTX-Video pipeline default
         from PIL import Image
         import random
+
+        fps = 25  # hardcoded — must match LTX-Video pipeline default
 
         # If the music node passed its duration, use that instead of the widget
         if music_duration is not None and float(music_duration) > 0.0:
@@ -519,7 +520,7 @@ class GooferProceduralClip:
 
         frame_tensor = torch.stack(frames, dim=0)
 
-        # Audio â€” use supplied music or fall back to silence
+        # Audio — use supplied music or fall back to silence
         if music is not None:
             try:
                 waveform = music["waveform"]          # [1, C, S]
@@ -537,7 +538,7 @@ class GooferProceduralClip:
                 log.info("[GooferProceduralClip] music attached (%d samples @ %dHz)",
                          target, sample_rate)
             except Exception as e:
-                log.warning("[GooferProceduralClip] music attach failed (%s) â€” using silence", e)
+                log.warning("[GooferProceduralClip] music attach failed (%s) — using silence", e)
                 n_samples = int(duration_sec * 48000)
                 audio = {"waveform": torch.zeros(1, 2, n_samples), "sample_rate": 48000}
         else:
@@ -555,7 +556,7 @@ class GooferProceduralClip:
         from nodes import NODE_CLASS_MAPPINGS
         cls = NODE_CLASS_MAPPINGS.get("CreateVideo")
         if cls is None:
-            raise RuntimeError("CreateVideo node not found â€” is ComfyUI-LTXVideo installed?")
+            raise RuntimeError("CreateVideo node not found — is ComfyUI-LTXVideo installed?")
         obj = cls()
         fn = getattr(cls, "FUNCTION", "execute")
         result = getattr(obj, fn)(images=images, audio=audio, fps=fps)
@@ -590,9 +591,9 @@ class GooferProceduralClip:
             "goof_lines": goof_lines,
         }
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ══════════════════════════════════════════════════════════════════
     #  GOOF NEON style
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ══════════════════════════════════════════════════════════════════
     def _goof_neon(self, w, h, t, frame, fps, data, fonts,
                    particles, ca, fractal_top, fractal_bot):
         from PIL import Image, ImageDraw
@@ -630,7 +631,7 @@ class GooferProceduralClip:
         # Content area (between sprocket strips)
         margin = int(w * 0.06)
 
-        # â”€â”€ Big goof count number â”€â”€
+        # ── Big goof count number ──
         count_raw = min(max(t - 0.05, 0) / 0.2, 1.0)
         count_p = _spring_overshoot(count_raw, damping=4.0, freq=10.0)
         if count_raw > 0:
@@ -645,7 +646,7 @@ class GooferProceduralClip:
             draw.text((num_x, label_y), "GOOFS FOUND",
                       font=fonts["small"], fill=_dim(NEON["dim"], count_p))
 
-        # â”€â”€ Title with spring â”€â”€
+        # ── Title with spring ──
         title_raw = min(max(t - 0.12, 0) / 0.2, 1.0)
         title_p = _spring_overshoot(title_raw, damping=4.0, freq=10.0)
         if title_raw > 0:
@@ -658,17 +659,17 @@ class GooferProceduralClip:
             _glow_text(draw, (tx, ty), display, fonts["title"],
                        NEON["cyan"], glow_radius=4, intensity=glow_i)
 
-        # â”€â”€ Year / Genre subtitle â”€â”€
+        # ── Year / Genre subtitle ──
         sub_raw = min(max(t - 0.22, 0) / 0.15, 1.0)
         if sub_raw > 0:
-            sub = f"{data['year']}  Â·  {data['genre_str']}"
+            sub = f"{data['year']}  ·  {data['genre_str']}"
             display = _typewriter(sub, min(sub_raw * 1.3, 1.0))
             sx = margin + int(w * 0.20)
             sy = int(h * 0.07) + int(50 * h / 512)
             draw.text((sx, sy), display, font=fonts["heading"],
                       fill=_dim(NEON["dim"], sub_raw))
 
-        # â”€â”€ Goof panels â”€â”€
+        # ── Goof panels ──
         panel_start_t = 0.30
         px = margin + int(w * 0.02)
         py = int(h * 0.35)
@@ -704,7 +705,7 @@ class GooferProceduralClip:
                 draw.line([(cx, cy), (cx, cy + cl * ddy)], fill=bc, width=2)
 
             # Goof number + category
-            goof_label = f"GOOF #{idx + 1}  Â·  {cat.upper()}"
+            goof_label = f"GOOF #{idx + 1}  ·  {cat.upper()}"
             draw.text((px + 8, by + 3),
                       _typewriter(goof_label, pp),
                       font=fonts["small"], fill=color)
@@ -717,7 +718,7 @@ class GooferProceduralClip:
                           _typewriter(desc, text_p),
                           font=fonts["body"], fill=NEON["white"])
 
-        # â”€â”€ Floating particles â”€â”€
+        # ── Floating particles ──
         for p in particles:
             pt = (t * p["speed"]) % 1.0
             noise_dx = _fbm(p["x"] * 4, time_sec * 0.3 + p["phase"], octaves=2) * 0.06 - 0.03
@@ -729,7 +730,7 @@ class GooferProceduralClip:
             sz = max(1, int(p["size"] * h / 512))
             draw.ellipse([x - sz, y - sz, x + sz, y + sz], fill=dot_c)
 
-        # â”€â”€ Corner brackets â”€â”€
+        # ── Corner brackets ──
         bf = min(t / 0.2, 1.0)
         if bf > 0:
             bl = int(min(w, h) * 0.04)
@@ -742,12 +743,12 @@ class GooferProceduralClip:
                 draw.line([(cx, cy), (cx + bl * ddx, cy)], fill=bc, width=2)
                 draw.line([(cx, cy), (cx, cy + bl * ddy)], fill=bc, width=2)
 
-        # â”€â”€ Scrolling ticker â”€â”€
+        # ── Scrolling ticker ──
         ticker_p = max(t - 0.55, 0) / 0.45
         if ticker_p > 0:
             ty = h - int(h * 0.055)
-            ticker = (f"   GOOFER v1.0  Â·  GOOF ANALYSIS  Â·  "
-                      f"{data['title']}  ({data['year']})  Â·  "
+            ticker = (f"   GOOFER v1.0  ·  GOOF ANALYSIS  ·  "
+                      f"{data['title']}  ({data['year']})  ·  "
                       f"{data['goof_count']} GOOFS DETECTED   ")
             offset = int(frame * 2.5) % max(len(ticker) * 10, 1)
             tc = _dim(NEON["dim"], ticker_p * 0.8)
@@ -755,7 +756,7 @@ class GooferProceduralClip:
             draw.line([(0, ty - 3), (w, ty - 3)],
                       fill=_dim(NEON["dim"], ticker_p * 0.3), width=1)
 
-        # â”€â”€ Fractal border filigree â”€â”€
+        # ── Fractal border filigree ──
         fractal_fade = _ease_out(min(max(t - 0.15, 0) / 0.3, 1.0))
         if fractal_fade > 0 and fractal_top is not None:
             for x_norm, escape in fractal_top:
@@ -787,9 +788,9 @@ class GooferProceduralClip:
 
         return Image.fromarray(img_arr)
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ══════════════════════════════════════════════════════════════════
     #  GOOF MINIMAL style
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ══════════════════════════════════════════════════════════════════
     def _goof_minimal(self, w, h, t, frame, fps, data, fonts):
         from PIL import Image, ImageDraw
 
@@ -816,7 +817,7 @@ class GooferProceduralClip:
 
         lines = [
             (data["title"], fonts["title"], (200, 200, 210), 0.08),
-            (f"{data['year']}  Â·  {data['genre_str']}", fonts["heading"],
+            (f"{data['year']}  ·  {data['genre_str']}", fonts["heading"],
              (120, 120, 140), 0.18),
             ("", None, None, 0),
             (f"{data['goof_count']} GOOFS DETECTED", fonts["heading"],
@@ -862,9 +863,9 @@ class GooferProceduralClip:
 
         return Image.fromarray(img_arr)
 
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ══════════════════════════════════════════════════════════════════
     #  GOOF RETRO style
-    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ══════════════════════════════════════════════════════════════════
     def _goof_retro(self, w, h, t, frame, fps, data, fonts, ca=None):
         from PIL import Image, ImageDraw
 
@@ -924,7 +925,7 @@ class GooferProceduralClip:
                 continue
 
             # Blinking cursor effect
-            cursor = "â–ˆ" if int(time_sec * 3) % 2 == 0 and idx == len(data["goof_lines"]) - 1 else ""
+            cursor = "█" if int(time_sec * 3) % 2 == 0 and idx == len(data["goof_lines"]) - 1 else ""
 
             line1 = f"[{idx+1}] TYPE: {cat.upper()}"
             draw.text((int(w * 0.05), y),
@@ -949,4 +950,3 @@ class GooferProceduralClip:
         img_arr = _apply_film_grain(img_arr, intensity=10, frame_idx=frame)
 
         return Image.fromarray(img_arr)
-

@@ -16,7 +16,7 @@ import time
 
 log = logging.getLogger("Goofer.PromptGen")
 
-# Shared genre/mood cache ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â populated by generate_prompts() while Phi-3 is
+# Shared genre/mood cache — populated by generate_prompts() while Phi-3 is
 # loaded, then read by GooferBackgroundMusic to build the MusicGen prompt.
 # Keyed by movie title string.  Replaces Flan-T5 genre inference entirely.
 _cached_genre_mood: dict = {}
@@ -127,7 +127,7 @@ def _phi3_prompt(model, tok, category: str, description: str, style: str) -> str
 _PHI3_GENRE_SYSTEM = (
     "You are a film music supervisor. Given a film plot, describe the ideal "
     "musical genre and mood in exactly 6-10 words. "
-    "Output ONLY the description ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no explanation, no punctuation at the end."
+    "Output ONLY the description — no explanation, no punctuation at the end."
 )
 
 _PHI3_GENRE_BAD = [

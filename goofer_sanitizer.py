@@ -97,7 +97,7 @@ _NSFW_TERMS = frozenset({
     "whore", "slut",
     # extreme gore / violence
     "decapitat", "dismemberment", "eviscer", "disembowel",
-    # child safety � absolute block
+    # child safety � absolute block
     "underage", "minor sexual", "child sexual", "lolita",
 })
 
@@ -120,6 +120,64 @@ _NSFW_BORDERLINE = frozenset({
     "shower", "bath", "intimate", "erotic", "sensual",
     "rape", "assault", "fondle", "grope",
 })
+
+# ── Banana Filter — weapons & graphic violence → 🍌 ───────────────────────────
+# Because no one needs guns in their AI film. Replace with bananas instead.
+# Ordered longest-first so "machine gun" matches before "gun".
+_BANANA_REPLACEMENTS = [
+    # multi-word weapons first
+    ("machine gun",        "bunch of bananas"),
+    ("shot gun",           "bunch of bananas"),
+    ("shotgun",            "bunch of bananas"),
+    ("semi-automatic",     "banana launcher"),
+    ("assault rifle",      "very long banana"),
+    ("sniper rifle",       "very long banana"),
+    ("hand grenade",       "banana bomb"),
+    ("pipe bomb",          "banana bomb"),
+    ("rocket launcher",    "banana cannon"),
+    ("submachine gun",     "bunch of bananas"),
+    # single weapons
+    ("grenade",            "banana bomb"),
+    ("pistol",             "banana"),
+    ("revolver",           "banana"),
+    ("handgun",            "banana"),
+    ("rifle",              "long banana"),
+    ("firearm",            "banana"),
+    ("weapon",             "banana"),
+    ("sword",              "really long banana"),
+    ("machete",            "large banana"),
+    ("chainsaw",           "electric banana"),
+    ("knife",              "small banana"),
+    ("dagger",             "pointy banana"),
+    ("axe",                "banana"),
+    ("gun",                "banana"),
+    # violence verbs
+    ("shoot",              "squirt with a banana"),
+    ("shoots",             "squirts with a banana"),
+    ("shot",               "hit with a banana"),
+    ("stab",               "poke with a banana"),
+    ("stabs",              "pokes with a banana"),
+    ("stabbed",            "poked with a banana"),
+    ("strangle",           "tickle"),
+    ("strangles",          "tickles"),
+    ("strangled",          "tickled"),
+    ("murder",             "banana party"),
+    ("murders",            "banana parties"),
+    ("murdered",           "banana partied"),
+    ("kill",               "tickle"),
+    ("kills",              "tickles"),
+    ("killed",             "slipped on a banana"),
+    ("bludgeon",           "bonk with a banana"),
+    ("bludgeons",          "bonks with a banana"),
+    # gore
+    ("blood",              "banana juice"),
+    ("bloodbath",          "banana smoothie"),
+    ("gore",               "banana mess"),
+    ("explosion",          "banana explosion"),
+    ("explode",            "go full banana"),
+    ("explodes",           "goes full banana"),
+    ("bomb",               "banana bomb"),
+]
 
 class GooferSanitizer:
     """Strips copyrighted terms, names, PII from goof descriptions."""
@@ -145,6 +203,22 @@ class GooferSanitizer:
                         "Turn off for public domain films where names are safe to use."
                     )
                 }),
+                "nsfw_ai_check": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": (
+                        "Run Flan-T5 AI secondary NSFW check on borderline goofs "
+                        "(bare, strip, intimate, etc.). Drops goof if AI judges it "
+                        "as explicit. Fast -- uses the 80 MB Flan-T5-small model."
+                    )
+                }),
+                "banana_filter": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": (
+                        "Replace all guns, weapons, and graphic violence with bananas. "
+                        "Keeps prompts safe for all audiences and makes everything "
+                        "considerably more fun. Highly recommended."
+                    )
+                }),
                 "custom_blocklist": ("STRING", {
                     "default": "",
                     "multiline": True,
@@ -154,7 +228,8 @@ class GooferSanitizer:
         }
 
     def sanitize(self, goofs_data, movie_data,
-                 enabled=True, custom_blocklist="", nsfw_ai_check=True):
+                 enabled=True, nsfw_ai_check=True, banana_filter=True,
+                 custom_blocklist=""):
         if not enabled:
             log.info("[Sanitizer] disabled — passing goofs through unchanged")
             return (goofs_data,)
@@ -175,7 +250,7 @@ class GooferSanitizer:
         sanitized = []
         for goof in goofs_data:
             text = goof["description"]
-            category = goof["category"]            # Step 0: NSFW filter � drop explicit goofs before any AI sees them
+            category = goof["category"]            # Step 0: NSFW filter � drop explicit goofs before any AI sees them
             nsfw_hit, nsfw_reason = self._is_nsfw(text)
             if nsfw_hit:
                 log.warning("[Sanitizer] NSFW goof DROPPED (%s): '%s'",
@@ -249,7 +324,11 @@ class GooferSanitizer:
             # Step 7: Strip PII patterns
             text = self._strip_pii(text)
 
-            # Step 8: Custom blocklist
+            # Step 8: Banana filter — weapons & graphic violence → 🍌
+            if banana_filter:
+                text = self._apply_banana_filter(text)
+
+            # Step 9: Custom blocklist
             if custom_terms:
                 text = self._strip_list(text, custom_terms, "[redacted]")
 
@@ -399,6 +478,20 @@ class GooferSanitizer:
             log.debug("[Sanitizer] AI NSFW check unavailable: %s", exc)
             return False
 
+
+    def _apply_banana_filter(self, text: str) -> str:
+        """Replace weapons and graphic violence terms with bananas.
+        Longest replacements applied first to avoid partial matches.
+        Case-insensitive, word-boundary aware.
+        """
+        for term, replacement in _BANANA_REPLACEMENTS:
+            text = re.sub(
+                r"\b" + re.escape(term) + r"\b",
+                replacement, text, flags=re.IGNORECASE
+            )
+        if text != text:  # always false, just for log hook
+            pass
+        return text
 
     def _strip_pii(self, text):
         """Remove emails, phone numbers, URLs, SSN-like patterns."""

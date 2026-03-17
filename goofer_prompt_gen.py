@@ -1,12 +1,11 @@
 """
-GooferPromptGen — Converts sanitized goofs into cinematic video prompts.
+GooferPromptGen -- Converts sanitized goofs into cinematic video prompts.
 
-Takes up to 5 sanitized goofs and generates text-to-video prompts that
-describe each goof as a short cinematic scene. Prompts are designed for
-LTX-2 / Wan / CogVideo / any text-to-video model.
-
-No copyrighted terms in output — all prompts use generic scene descriptions
-derived from the goof's category and sanitized description.
+Two modes:
+  Template   -- Fast, deterministic, no extra model. Category-aware templates.
+  Phi-3-mini -- microsoft/Phi-3-mini-4k-instruct generates richer AI prompts.
+                Auto-downloads ~4 GB first use. Unloads VRAM after generation
+                so LTX-Video has full headroom. NSFW refusal baked in.
 
 Author: Jeffrey A. Brick
 """
@@ -18,7 +17,111 @@ import time
 log = logging.getLogger("Goofer.PromptGen")
 
 
-# ── Camera moves ───────────────────────────────────────────────────────
+# -- Phi-3-mini lazy loader ----------------------------------------------------
+_phi3_model = None
+_phi3_tok   = None
+
+
+def _get_phi3():
+    """Lazy-load microsoft/Phi-3-mini-4k-instruct in float16."""
+    global _phi3_model, _phi3_tok
+    if _phi3_model is not None:
+        return _phi3_model, _phi3_tok
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        model_id = "microsoft/Phi-3-mini-4k-instruct"
+        log.info("[PromptGen] Loading Phi-3-mini (~4 GB first run)...")
+        _phi3_tok = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        _phi3_model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        _phi3_model.eval()
+        log.info("[PromptGen] Phi-3-mini loaded.")
+    except Exception as exc:
+        log.warning("[PromptGen] Phi-3-mini unavailable (%s) -- Template mode.", exc)
+        _phi3_model = None
+        _phi3_tok   = None
+    return _phi3_model, _phi3_tok
+
+
+def _unload_phi3():
+    """Free VRAM after prompts are done so LTX-Video has full headroom."""
+    global _phi3_model, _phi3_tok
+    if _phi3_model is None:
+        return
+    try:
+        import torch
+        del _phi3_model, _phi3_tok
+        _phi3_model = None
+        _phi3_tok   = None
+        torch.cuda.empty_cache()
+        log.info("[PromptGen] Phi-3-mini unloaded from VRAM.")
+    except Exception as exc:
+        log.debug("[PromptGen] Phi-3 unload: %s", exc)
+
+
+# NSFW refusal + quality rules baked into system prompt
+_PHI3_SYSTEM = (
+    "You are a professional film director writing text-to-video prompts for an AI "
+    "video model. Your prompts describe short 5-second cinematic scenes. "
+    "Rules you must always follow:\n"
+    "1. Output ONLY the prompt text -- no preamble, no explanation, no quotes.\n"
+    "2. ALL AGES SAFE. No nudity, no sexual content, no graphic violence. "
+    "If the goof description contains such content, substitute a safe cinematic "
+    "scene that captures the same visual energy without the explicit element.\n"
+    "3. No real actor names, character names, film titles, brand names, or studio names.\n"
+    "4. Between 40 and 80 words.\n"
+    "5. Always specify camera movement, lighting quality, and visual style.\n"
+)
+
+_PHI3_USER_TMPL = (
+    "Film goof category: {category}\n"
+    "Goof description: {description}\n\n"
+    "Write a cinematic 5-second text-to-video prompt inspired by this goof. "
+    "Visual style: {style}."
+)
+
+_PHI3_BAD = ["i cannot", "i can't", "i'm sorry", "i apologize", "as an ai"]
+
+
+def _phi3_prompt(model, tok, category: str, description: str, style: str) -> str:
+    """Generate one LTX-Video prompt via Phi-3-mini. Returns '' on failure."""
+    import torch
+    msg = _PHI3_USER_TMPL.format(
+        category=category, description=description[:300], style=style
+    )
+    messages = [
+        {"role": "system", "content": _PHI3_SYSTEM},
+        {"role": "user",   "content": msg},
+    ]
+    text   = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tok(text, return_tensors="pt", truncation=True, max_length=512).to(model.device)
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=120,
+            temperature=0.7,
+            do_sample=True,
+            top_p=0.9,
+            pad_token_id=tok.eos_token_id,
+        )
+    new_tok = out[0][inputs["input_ids"].shape[1]:]
+    result  = tok.decode(new_tok, skip_special_tokens=True).strip()
+
+    if len(result.split()) < 10:
+        log.warning("[PromptGen] Phi-3 output too short, using template fallback.")
+        return ""
+    if any(b in result.lower() for b in _PHI3_BAD):
+        log.warning("[PromptGen] Phi-3 refusal/bad output detected, using template fallback.")
+        return ""
+    return result
+
+
+# -- Template system -----------------------------------------------------------
 _CAMERAS = [
     "slow pan left",
     "slow tracking shot forward",
@@ -30,12 +133,10 @@ _CAMERAS = [
     "steady handheld medium shot",
 ]
 
-# ── Style prefixes ─────────────────────────────────────────────────────
 _STYLE_PREFIXES = {
     "blockbuster": (
         "Epic Hollywood blockbuster, IMAX-scale wide shot, bold dynamic lighting, "
-        "rich saturated color grade, fast dramatic camera push, practical stunt energy, "
-        "cinematic lens flare, massive production value."
+        "rich saturated color grade, cinematic lens flare."
     ),
     "noir_cinematic": (
         "Film noir style, high contrast lighting with deep shadows, "
@@ -55,12 +156,10 @@ _STYLE_PREFIXES = {
     ),
     "retro_vhs": (
         "VHS camcorder aesthetic, slight tracking distortion, warm oversaturated colors, "
-        "4:3 aspect feel, tape hiss, 1990s home video look."
+        "4:3 aspect feel, 1990s home video look."
     ),
 }
 
-# ── Category-specific scene templates ──────────────────────────────────
-# Each template takes {description} and builds a cinematic scene around it.
 _CATEGORY_SCENES = {
     "Continuity": [
         "Close-up shot of a table with objects. {camera}, {description}, "
@@ -69,7 +168,7 @@ _CATEGORY_SCENES = {
         "mismatched props between angles, cinematic tension, {lighting}",
     ],
     "Factual Error": [
-        "Wide shot of a scene with historical details. {camera}, {description}, "
+        "Wide shot of a historical scene. {camera}, {description}, "
         "period setting with anachronistic elements visible, {lighting}",
         "Documentary-style recreation. {camera}, {description}, "
         "factual inconsistency highlighted by framing, {lighting}",
@@ -114,7 +213,6 @@ _CATEGORY_SCENES = {
     ],
 }
 
-# Default template for unknown categories
 _DEFAULT_SCENES = [
     "Cinematic movie scene. {camera}, {description}, "
     "subtle filmmaking error visible to attentive viewers, {lighting}",
@@ -122,7 +220,6 @@ _DEFAULT_SCENES = [
     "movie mistake caught on camera, {lighting}",
 ]
 
-# ── Lighting options ───────────────────────────────────────────────────
 _LIGHTING = [
     "warm practical lighting from table lamps",
     "cool blue moonlight through windows",
@@ -135,66 +232,90 @@ _LIGHTING = [
 ]
 
 
-class GooferPromptGen:
-    """Converts sanitized goofs into 5 cinematic video prompts."""
+def _template_prompt(rng, category: str, description: str, style_prefix: str) -> str:
+    templates = _CATEGORY_SCENES.get(category, _DEFAULT_SCENES)
+    scene = rng.choice(templates).format(
+        camera=rng.choice(_CAMERAS),
+        description=description,
+        lighting=rng.choice(_LIGHTING),
+    )
+    return f"{style_prefix} {scene}".strip()
 
-    CATEGORY = "Goofer"
-    FUNCTION = "generate_prompts"
+
+class GooferPromptGen:
+    """Converts sanitized goofs into 5 cinematic video prompts.
+
+    prompt_mode = Template  : fast, no extra model, category-aware templates.
+    prompt_mode = Phi-3-mini: richer AI-written prompts. Unloads after generation.
+    NSFW content refused in both modes.
+    """
+
+    CATEGORY     = "Goofer"
+    FUNCTION     = "generate_prompts"
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "INT")
-    RETURN_NAMES = ("prompt_1", "prompt_2", "prompt_3", "prompt_4", "prompt_5",
-                    "live_seed")
-    OUTPUT_NODE = False
+    RETURN_NAMES = ("prompt_1", "prompt_2", "prompt_3", "prompt_4", "prompt_5", "live_seed")
+    OUTPUT_NODE  = False
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "config": ("GOOFER_CONFIG",),
+                "config":     ("GOOFER_CONFIG",),
                 "goofs_data": ("GOOFER_GOOFS",),
                 "movie_data": ("GOOFER_MOVIE",),
             },
+            "optional": {
+                "prompt_mode": (["Template", "Phi-3-mini"], {
+                    "default": "Phi-3-mini",
+                    "tooltip": (
+                        "Template: fast, no extra model. "
+                        "Phi-3-mini: AI-written prompts via microsoft/Phi-3-mini-4k-instruct "
+                        "(~4 GB first download, unloads before LTX-Video). "
+                        "NSFW refused in both modes."
+                    ),
+                }),
+            },
         }
 
-    def generate_prompts(self, config, goofs_data, movie_data):
-
-        base_seed = config["seed"]
-        live_seed = base_seed ^ (int(time.time()) & 0xFFFFFFFF)
-
-        style_key = config.get("visual_style", "noir_cinematic")
+    def generate_prompts(self, config, goofs_data, movie_data, prompt_mode="Phi-3-mini"):
+        base_seed    = config["seed"]
+        live_seed    = base_seed ^ (int(time.time()) & 0xFFFFFFFF)
+        style_key    = config.get("visual_style", "noir_cinematic")
         style_prefix = _STYLE_PREFIXES.get(style_key, "")
+        style_name   = style_key.replace("_", " ")
 
-        # Build prompts for each goof (up to 5)
+        phi3_model = phi3_tok = None
+        if prompt_mode == "Phi-3-mini":
+            phi3_model, phi3_tok = _get_phi3()
+            if phi3_model is None:
+                log.warning("[PromptGen] Phi-3-mini unavailable -- using Template mode.")
+                prompt_mode = "Template"
+
         prompts = []
         for i, goof in enumerate(goofs_data[:5]):
-            rng = random.Random(live_seed + i * 7919)
-
-            category = goof.get("category", "Miscellaneous")
+            rng         = random.Random(live_seed + i * 7919)
+            category    = goof.get("category", "Miscellaneous")
             description = goof.get("description", "a filmmaking error")
 
-            # Pick scene template
-            templates = _CATEGORY_SCENES.get(category, _DEFAULT_SCENES)
-            template = rng.choice(templates)
+            if prompt_mode == "Phi-3-mini":
+                result = _phi3_prompt(phi3_model, phi3_tok, category, description, style_name)
+                if not result:
+                    # Template fallback if Phi-3 output is bad or refused
+                    result = _template_prompt(rng, category, description, style_prefix)
+            else:
+                result = _template_prompt(rng, category, description, style_prefix)
 
-            # Pick camera and lighting
-            camera = rng.choice(_CAMERAS)
-            lighting = rng.choice(_LIGHTING)
+            prompts.append(result)
+            log.info("[PromptGen] goof %d [%s] (%s): %s...",
+                     i + 1, category, prompt_mode, result[:80])
 
-            # Build the prompt
-            scene = template.format(
-                camera=camera,
-                description=description,
-                lighting=lighting,
-            )
+        # Unload Phi-3 so LTX-Video gets full VRAM
+        if prompt_mode == "Phi-3-mini":
+            _unload_phi3()
 
-            prompt = f"{style_prefix} {scene}".strip()
-            prompts.append(prompt)
-
-            log.info("[PromptGen] goof %d [%s]: %s...",
-                     i + 1, category, prompt[:80])
-
-        # Pad to 5 with empty strings — BatchVideo will skip empty slots
         while len(prompts) < 5:
             prompts.append("")
 
-        log.info("[PromptGen] Generated %d prompts (seed=%d)", len(prompts), live_seed)
+        log.info("[PromptGen] Generated %d prompts (mode=%s seed=%d)",
+                 len(prompts), prompt_mode, live_seed)
         return (*prompts, live_seed)

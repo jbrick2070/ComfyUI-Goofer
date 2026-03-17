@@ -1,0 +1,51 @@
+# ComfyUI-Goofer v1.0
+## IMDb Goof-to-Video Pipeline
+
+**Random IMDb movie goof → AI video prompt → LTX-2 video clips → procedural interstitial → MusicGen film score → final stitched video.**
+
+Fully automated. Zero API keys. Drop into `custom_nodes/` and queue.
+
+---
+
+## Download
+
+[![Download Goofer v1.0](https://img.shields.io/badge/Download-Goofer_v1.0-blue?style=for-the-badge)](https://github.com/jbrick2070/ComfyUI-Goofer/releases)
+
+**[Click here to download the full package (v1.0)](https://github.com/jbrick2070/ComfyUI-Goofer/releases)** — includes workflow JSON + this guide.
+
+---
+
+## What It Does
+
+Goofer picks a random film from a pool of 424 curated titles, fetches its IMDb continuity errors and goofs, sanitizes all copyrighted names and brands, generates a cinematic video prompt for each goof, renders an LTX-2 video clip per goof, creates a procedural data-viz interstitial with an AI-generated film score, then stitches everything into a single upscaled output video.
+
+Every run is a different movie. Every queue is a new short film.
+
+---
+
+## New to ComfyUI? Start Here
+
+ComfyUI is a free, node-based interface for running AI image and video models locally on your GPU.
+
+> **Already have ComfyUI installed?** Skip to Step 2.
+
+### Step 1 — Install ComfyUI
+
+Use the official desktop installer — it handles Python, Git, and dependencies automatically:
+
+**https://www.comfy.org/download**
+
+Advanced users can also install manually from https://github.com/comfyanonymous/ComfyUI
+
+### Step 2 — Install Required Models
+
+> **☕ Grab a coffee — the main video model is ~9.5 GB.**
+
+| Model | Download | Size | Save To |
+|-------|----------|------|---------|
+| **LTX-Video v0.9.5** (required) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.5.safetensors) | ~9.5 GB | `ComfyUI/models/checkpoints/` |
+| **LTX-Video 13B** (optional, higher quality) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled.safetensors) | ~26 GB | `ComfyUI/models/checkpoints/` |
+| **MusicGen Large** | Auto-downloaded on first run | ~3.3 GB | HuggingFace cache |
+| **Phi-3-mini-4k-instruct** | Auto-downloaded on first run | ~4 GB | HuggingFace cache |
+
+> MusicGen and Phi-3-mini download automatically the first time you run the workflow — no manual steps needed.

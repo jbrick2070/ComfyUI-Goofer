@@ -317,6 +317,13 @@ class GooferSanitizer:
             if custom_terms:
                 text = self._strip_list(text, custom_terms, "[redacted]")
 
+            # Clean up orphaned Roman numerals after name replacement
+            # e.g. "a character IV" → "a character", "the character III" → "the character"
+            text = re.sub(
+                r'\b(a character|the character|a spy|the film)\s+[IVXLCDM]+\b',
+                r'\1', text
+            )
+
             # Clean up whitespace
             text = re.sub(r"\s+", " ", text).strip()
             text = re.sub(r"\s+([,.])", r"\1", text)
@@ -386,6 +393,13 @@ class GooferSanitizer:
             "Irish", "Scottish", "Welsh", "English", "Dutch",
             "Swedish", "Norwegian", "Danish", "Finnish", "Swiss",
             "Mexican", "Brazilian", "Indian", "Korean", "Thai",
+            # royal / noble titles — prevent "King Baldwin" → "a character Baldwin"
+            # The name after the title is caught by cast_names list instead
+            "King", "Queen", "Prince", "Princess", "Duke", "Earl",
+            "Lord", "Lady", "Sir", "Dame", "Baron", "Count",
+            "Countess", "Marquis", "Viscount", "Duchess", "Kaiser",
+            "Tsar", "Sultan", "Sheikh", "Emir", "Pharaoh", "Emperor",
+            "Empress", "Regent", "Viceroy",
         }
         # Words that cannot be the SECOND word of a real "First Last" name
         # (venues, events, institutions, locations, sports terms, etc.)

@@ -46,9 +46,9 @@ Advanced users can also install manually from https://github.com/comfyanonymous/
 | **LTX-Video v0.9.5** (required) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.5.safetensors) | ~9.5 GB | `ComfyUI/models/checkpoints/` |
 | **LTX-Video 13B** (optional, higher quality) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled.safetensors) | ~26 GB | `ComfyUI/models/checkpoints/` |
 | **MusicGen Large** | Auto-downloaded on first run | ~3.3 GB | HuggingFace cache |
-| **Flan-T5-small** | Auto-downloaded on first run | ~80 MB | HuggingFace cache |
+| **Phi-3-mini-4k-instruct** | Auto-downloaded on first run | ~4 GB | HuggingFace cache |
 
-> MusicGen and Flan-T5 download automatically the first time you run the workflow — no manual steps needed.
+> MusicGen and Phi-3-mini download automatically the first time you run the workflow — no manual steps needed.
 
 ### Step 3 — Install ComfyUI-Goofer
 
@@ -113,9 +113,9 @@ GooferBatchVideo                                  │
 | **GooferInit** | Sets global config: output path, upscale mode, seed |
 | **GooferGoofFetch** | Picks a random film from 424 titles, fetches goofs from IMDb via Cinemagoer + direct HTTP fallback. Seed-diversified so every run draws a fresh subset from the full goof pool |
 | **GooferSanitizer** *(Copyright Cleaner)* | Strips copyrighted character names, actor names, studio names, brand names, and franchise references from all goof text before it reaches any AI model |
-| **GooferPromptGen** | Converts sanitized goof descriptions into cinematic LTX-2 video prompts using category-aware templates (continuity errors → observational style, factual errors → documentary style, etc.) |
+| **GooferPromptGen** | Converts sanitized goof descriptions into cinematic LTX-2 video prompts. Phi-3-mini mode generates creative, film-aware prompts; Template mode uses category-aware templates as fallback (continuity errors → observational style, factual errors → documentary style, etc.) |
 | **GooferBatchVideo** | Feeds each prompt to LTX-Video and renders one video clip per goof. Configurable resolution, frame count, and guidance strength per clip |
-| **GooferBackgroundMusic** | Generates a film score with Meta MusicGen 3. Prompt is derived from actual goof keywords (explosions → percussive bass, chases → driving rhythm, basketball → upbeat brass, etc.) plus Flan-T5-small genre/mood inference from the film's plot. Falls back to additive-synthesis chord progression if MusicGen is unavailable |
+| **GooferBackgroundMusic** | Generates a film score with Meta MusicGen 3. Prompt is derived from actual goof keywords (explosions → percussive bass, chases → driving rhythm, basketball → upbeat brass, etc.) plus Phi-3-mini genre/mood cached by PromptGen. A `prompt_seed` input enforces execution order so the genre cache is always populated before MusicGen runs. Falls back to additive-synthesis chord progression if MusicGen is unavailable |
 | **GooferProceduralClip** | Renders a data-viz interstitial showing goof metadata as animated neon graphics. Duration syncs to the MusicGen output length via the `music_duration` input |
 | **GooferAudioEnhance** | Optional EQ / loudness normalization pass on the final audio mix |
 
@@ -176,7 +176,7 @@ Remove-Item "ComfyUI/custom_nodes/ComfyUI-Goofer/__pycache__" -Recurse -Force
 <details>
 <summary><strong>MusicGen prompt shows "cinematic atmospheric" every run</strong></summary>
 
-**Cause:** No plot text from Cinemagoer (common on first fetch for some titles), so Flan-T5 skips inference and the genre keyword dict has no match.
+**Cause:** No plot text from Cinemagoer (common on first fetch for some titles), so genre/mood falls back to the keyword dict which has no match.
 
 **What to expect:** This is normal for some titles on first run. Goof keyword matching (explosions, chases, fights, sports, etc.) still enriches the prompt regardless of genre availability.
 </details>
@@ -224,14 +224,14 @@ Run Goofer as a live generative broadcast — each output video auto-loads into 
 
 ---
 
-## Content Policy � No NSFW / Explicit Content
+## Content Policy � No NSFW / Explicit Content
 
 ComfyUI-Goofer includes a mandatory two-stage explicit content filter built into the **Copyright Cleaner** (GooferSanitizer) node. It runs on every goof before any text reaches LTX-Video or MusicGen.
 
-**Stage 1 � Keyword & Pattern Block (always on)**
+**Stage 1 � Keyword & Pattern Block (always on)**
 Any goof containing explicit sexual terms, nudity references, graphic gore, or child-safety violations is silently dropped and logged. It never reaches the prompt generator.
 
-**Stage 2 � AI Judge (Flan-T5, default on)**
+**Stage 2 � AI Judge (Flan-T5, default on)**
 Borderline goofs containing words like "bare", "intimate", "strip", or "shower" are passed to Flan-T5-small with the instruction: *"Is this description appropriate for all audiences and free from sexual or explicit content?"* If the answer is "no", the goof is dropped.
 
 This filter cannot be disabled from the workflow UI. The only override is editing the source directly, which you should not do unless you are using Goofer with fully public-domain films in a verified adult-only context compliant with all applicable laws.
@@ -243,8 +243,9 @@ This filter cannot be disabled from the workflow UI. The only override is editin
 ```
 cinemagoer
 requests
-transformers>=4.40.0
+transformers>=5.0.0
 torch>=2.0.0
+accelerate
 numpy
 ```
 

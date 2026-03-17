@@ -487,15 +487,13 @@ class GooferBackgroundMusic:
                     "default": 0.85, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "Output volume (sole audio on procedural clip)"
                 }),
-                "fade_in_sec": ("FLOAT", {
-                    "default": 0.5, "min": 0.0, "max": 5.0, "step": 0.1,
-                }),
-                "fade_out_sec": ("FLOAT", {
-                    "default": 2.0, "min": 0.0, "max": 10.0, "step": 0.5,
-                }),
-                "sample_rate": ("INT", {
-                    "default": 48000, "min": 8000, "max": 96000, "step": 1000,
-                    "tooltip": "Output sample rate — 48000 to match LTX-2 pipeline"
+                "prompt_seed": ("INT", {
+                    "default": 0, "forceInput": True,
+                    "tooltip": (
+                        "Wire PromptGen live_seed here. Value unused --"
+                        "this link forces ComfyUI to run PromptGen first so the "
+                        "Phi-3 genre/mood cache is populated before MusicGen."
+                    )
                 }),
             },
         }
@@ -527,9 +525,13 @@ class GooferBackgroundMusic:
                goofs_data=None,
                musicgen_model: str = "facebook/musicgen-large",
                volume: float = 0.85,
-               fade_in_sec: float = 0.5,
-               fade_out_sec: float = 2.0,
-               sample_rate: int = 48000):
+               prompt_seed: int = 0):
+        # Hardcoded - never expose as widgets.
+        # sample_rate must always match LTX-2 pipeline (48000 Hz).
+        # fade_in/out only affect chord fallback; MusicGen ignores them.
+        sample_rate  = 48000
+        fade_in_sec  = 0.5
+        fade_out_sec = 2.0
 
         target = float(duration_sec)
 
@@ -559,3 +561,4 @@ class GooferBackgroundMusic:
         log.info("[BackgroundMusic] chord-progression → %.1fs @ vol %.0f%%",
                  target, volume * 100)
         return (audio_dict, target)
+

@@ -16,7 +16,7 @@ import time
 
 log = logging.getLogger("Goofer.PromptGen")
 
-# Shared genre/mood cache — populated by generate_prompts() while Phi-3 is
+# Shared genre/mood cache ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â populated by generate_prompts() while Phi-3 is
 # loaded, then read by GooferBackgroundMusic to build the MusicGen prompt.
 # Keyed by movie title string.  Replaces Flan-T5 genre inference entirely.
 _cached_genre_mood: dict = {}
@@ -37,17 +37,13 @@ def _get_phi3():
         from transformers import AutoModelForCausalLM, AutoTokenizer
         model_id = "microsoft/Phi-3-mini-4k-instruct"
         log.info("[PromptGen] Loading Phi-3-mini (~4 GB first run)...")
-        _phi3_tok = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        _phi3_tok = AutoTokenizer.from_pretrained(model_id)
         _phi3_model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            torch_dtype=torch.float16,
-            device_map="auto",
-            trust_remote_code=True,
-        )
-        _phi3_model.eval()
-        log.info("[PromptGen] Phi-3-mini loaded.")
+            torch_dtype=torch.float16,  # native transformers 5.0 Phi-3 support
+        ).to("cuda").eval()
     except Exception as exc:
-        log.warning("[PromptGen] Phi-3-mini unavailable (%s) -- Template mode.", exc)
+        log.exception("[PromptGen] Phi-3-mini failed to load -- Template mode.")
         _phi3_model = None
         _phi3_tok   = None
     return _phi3_model, _phi3_tok
@@ -131,7 +127,7 @@ def _phi3_prompt(model, tok, category: str, description: str, style: str) -> str
 _PHI3_GENRE_SYSTEM = (
     "You are a film music supervisor. Given a film plot, describe the ideal "
     "musical genre and mood in exactly 6-10 words. "
-    "Output ONLY the description — no explanation, no punctuation at the end."
+    "Output ONLY the description ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no explanation, no punctuation at the end."
 )
 
 _PHI3_GENRE_BAD = [

@@ -203,14 +203,6 @@ class GooferSanitizer:
                         "Turn off for public domain films where names are safe to use."
                     )
                 }),
-                "nsfw_ai_check": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": (
-                        "Run Flan-T5 AI secondary NSFW check on borderline goofs "
-                        "(bare, strip, intimate, etc.). Drops goof if AI judges it "
-                        "as explicit. Fast -- uses the 80 MB Flan-T5-small model."
-                    )
-                }),
                 "banana_filter": ("BOOLEAN", {
                     "default": True,
                     "tooltip": (
@@ -228,8 +220,7 @@ class GooferSanitizer:
         }
 
     def sanitize(self, goofs_data, movie_data,
-                 enabled=True, nsfw_ai_check=True, banana_filter=True,
-                 custom_blocklist=""):
+                 enabled=True, banana_filter=True, custom_blocklist=""):
         if not enabled:
             log.info("[Sanitizer] disabled — passing goofs through unchanged")
             return (goofs_data,)
@@ -256,12 +247,6 @@ class GooferSanitizer:
                 log.warning("[Sanitizer] NSFW goof DROPPED (%s): '%s'",
                             nsfw_reason, text[:80])
                 continue
-            # AI secondary check for borderline terms
-            if nsfw_ai_check and any(b in text.lower() for b in _NSFW_BORDERLINE):
-                if self._is_nsfw_ai(text):
-                    log.warning("[Sanitizer] NSFW goof DROPPED (AI judge): '%s'",
-                                text[:80])
-                    continue
 
 
             # Step 1: Strip franchise names (longest first to avoid partial matches)
@@ -453,31 +438,6 @@ class GooferSanitizer:
             if m:
                 return True, f"pattern:{m.group(0)}"
         return False, ""
-
-    def _is_nsfw_ai(self, text: str) -> bool:
-        """Flan-T5 secondary NSFW check for borderline text.
-        Returns True if AI judges the content as NOT appropriate for all ages."""
-        try:
-            from .goofer_background_music import _get_flan
-            import torch
-            model, tok = _get_flan()
-            if model is None:
-                return False
-            prompt = (
-                "Is the following film description appropriate for all audiences "
-                "and free from sexual, nude, or explicit content? "
-                "Answer only 'yes' or 'no'.\n\nDescription: " + text[:250]
-            )
-            inputs = tok(prompt, return_tensors="pt", truncation=True, max_length=300)
-            with torch.no_grad():
-                out = model.generate(**inputs, max_new_tokens=5, num_beams=2)
-            answer = tok.decode(out[0], skip_special_tokens=True).strip().lower()
-            log.debug("[Sanitizer] AI NSFW check ? '%s' for: '%s'", answer, text[:50])
-            return answer.startswith("no")
-        except Exception as exc:
-            log.debug("[Sanitizer] AI NSFW check unavailable: %s", exc)
-            return False
-
 
     def _apply_banana_filter(self, text: str) -> str:
         """Replace weapons and graphic violence terms with bananas.

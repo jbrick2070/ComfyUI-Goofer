@@ -8,12 +8,16 @@ Primary path : Meta MusicGen 3 (facebook/musicgen-large)
 Fallback     : Contextual chord-progression (additive synthesis, zero deps)
                Derives tempo / key / instrument from the same movie context.
 
+Genre/mood   : Read from goofer_prompt_gen._cached_genre_mood, populated
+               by Phi-3-mini during PromptGen while the model is loaded.
+               Falls back to keyword-dict lookup if cache is empty.
+
 Outputs:
   music        — AUDIO tensor (1, 2, samples) stereo
   duration_sec — FLOAT echoed back so it can wire to GooferProceduralClip's
                  'music_duration' input and keep both clips the same length.
 
-v2.1  2026-03-15  Removed all MIDI / pretty_midi / mido references.
+v2.2  2026-03-16  Replaced Flan-T5 genre inference with Phi-3-mini cache.
 """
 
 import logging
@@ -23,73 +27,22 @@ import numpy as np
 log = logging.getLogger("Goofer.BackgroundMusic")
 
 
-# ─── Flan-T5 genre/mood inferencer (lazy, one-shot) ─────────────────────────
+# ─── Genre/mood cache — populated by GooferPromptGen via Phi-3-mini ──────────
+# GooferPromptGen infers genre/mood while Phi-3 is already loaded for prompt
+# generation, caches it here by title, then unloads Phi-3.  BackgroundMusic
+# reads the cache so MusicGen gets a meaningful genre/mood string without
+# ever loading a second LLM.
 
-_FLAN_MODEL     = None
-_FLAN_TOKENIZER = None
-_FLAN_FAILED    = False
-_FLAN_MODEL_ID  = "google/flan-t5-small"   # ~80 MB — fast, instruction-tuned
-
-
-def _get_flan():
-    """Lazy-load flan-t5-small once per session.  Returns (model, tokenizer) or (None, None)."""
-    global _FLAN_MODEL, _FLAN_TOKENIZER, _FLAN_FAILED
-    if _FLAN_FAILED:
-        return None, None
-    if _FLAN_MODEL is not None:
-        return _FLAN_MODEL, _FLAN_TOKENIZER
+def _get_cached_genre_mood(title: str) -> str:
+    """Read Phi-3-inferred genre/mood from PromptGen's cache."""
     try:
-        from transformers import T5ForConditionalGeneration, AutoTokenizer
-        log.info("[BackgroundMusic] Loading Flan-T5-small for genre inference...")
-        tok   = AutoTokenizer.from_pretrained(_FLAN_MODEL_ID)
-        model = T5ForConditionalGeneration.from_pretrained(_FLAN_MODEL_ID)
-        model.eval()
-        _FLAN_MODEL     = model
-        _FLAN_TOKENIZER = tok
-        log.info("[BackgroundMusic] Flan-T5-small ready")
-        return model, tok
+        from .goofer_prompt_gen import _cached_genre_mood
+        mood = _cached_genre_mood.get(title, "")
+        if mood:
+            log.info("[BackgroundMusic] genre/mood from Phi-3 cache: %s", mood)
+        return mood
     except Exception as exc:
-        log.warning("[BackgroundMusic] Flan-T5-small unavailable (%s) — using keyword fallback", exc)
-        _FLAN_FAILED = True
-        return None, None
-
-
-def _infer_genre_mood(title: str, plot: str) -> str:
-    """Ask Flan-T5-small to describe the film's genre and mood in ≤12 words.
-
-    Returns a short string like 'uplifting sports drama with triumphant orchestral score'
-    or empty string on failure.
-    """
-    model, tok = _get_flan()
-    if model is None:
-        return ""
-    try:
-        # Only run if we have actual plot text to ground the inference.
-        # Title-only prompts produce hallucinations from tiny models — skip them.
-        if not plot or len(plot.strip()) < 25:
-            return ""
-        prompt = (
-            f"In 8 words, what musical mood and genre fits this film plot: {plot[:300]}"
-        )
-        inputs = tok(prompt, return_tensors="pt", truncation=True, max_length=256)
-        with torch.no_grad():
-            out = model.generate(**inputs, max_new_tokens=20,
-                                 num_beams=4, early_stopping=True)
-        result = tok.decode(out[0], skip_special_tokens=True).strip()
-        # Guard 1 — must be at least 4 words (single-word outputs like "sexy" are noise)
-        if len(result.split()) < 4:
-            log.warning("[BackgroundMusic] Flan-T5 output too short, discarding: %s", result)
-            return ""
-        # Guard 2 — reject factual hallucinations ("directed by", "based on", etc.)
-        _BAD_PATTERNS = ["directed by", "written by", "is based on", "starring",
-                         "stars ", "produced by", "released in", "film is"]
-        if any(p in result.lower() for p in _BAD_PATTERNS):
-            log.warning("[BackgroundMusic] Flan-T5 hallucinated factual response, discarding: %s", result)
-            return ""
-        log.info("[BackgroundMusic] Flan-T5 genre inference: %s", result)
-        return result
-    except Exception as exc:
-        log.warning("[BackgroundMusic] Flan-T5 inference failed: %s", exc)
+        log.debug("[BackgroundMusic] genre/mood cache unavailable: %s", exc)
         return ""
 
 
@@ -252,13 +205,11 @@ def _build_musicgen_prompt(movie_data: dict, goofs_data: list) -> str:
                 if len(matched_cues) >= 4:
                     break
 
-    # ── AI genre/mood layer (Flan-T5-small) ──────────────────────────────
-    # Ask a small instruction-tuned LLM to describe the film's genre and
-    # mood from its title + plot.  Falls back to genre-dict lookup if the
-    # model is unavailable.
-    title = movie_data.get("title", "")
-    plot  = movie_data.get("plot", "")
-    ai_mood = _infer_genre_mood(title, plot) if title else ""
+    # ── Genre/mood from Phi-3 cache (set by GooferPromptGen) ─────────────
+    # Phi-3-mini infers this while already loaded for prompt generation,
+    # caches by title, then unloads.  Zero extra VRAM needed here.
+    title   = movie_data.get("title", "")
+    ai_mood = _get_cached_genre_mood(title) if title else ""
 
     if not ai_mood:
         # Keyword-dict fallback

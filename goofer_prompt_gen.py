@@ -16,6 +16,11 @@ import time
 
 log = logging.getLogger("Goofer.PromptGen")
 
+# Shared genre/mood cache — populated by generate_prompts() while Phi-3 is
+# loaded, then read by GooferBackgroundMusic to build the MusicGen prompt.
+# Keyed by movie title string.  Replaces Flan-T5 genre inference entirely.
+_cached_genre_mood: dict = {}
+
 
 # -- Phi-3-mini lazy loader ----------------------------------------------------
 _phi3_model = None
@@ -119,6 +124,57 @@ def _phi3_prompt(model, tok, category: str, description: str, style: str) -> str
         log.warning("[PromptGen] Phi-3 refusal/bad output detected, using template fallback.")
         return ""
     return result
+
+
+# -- Phi-3 genre/mood inference (runs while Phi-3 is already loaded) -----------
+
+_PHI3_GENRE_SYSTEM = (
+    "You are a film music supervisor. Given a film plot, describe the ideal "
+    "musical genre and mood in exactly 6-10 words. "
+    "Output ONLY the description — no explanation, no punctuation at the end."
+)
+
+_PHI3_GENRE_BAD = [
+    "directed by", "written by", "starring", "based on",
+    "released in", "produced by", "i cannot", "i can't",
+]
+
+
+def _infer_phi3_genre_mood(model, tok, title: str, plot: str) -> str:
+    """Ask Phi-3-mini for a genre/mood description to drive MusicGen.
+
+    Returns a string like 'suspenseful orchestral thriller with dark piano'
+    or '' if inference fails or plot is too short.
+    """
+    import torch
+    if not plot or len(plot.strip()) < 25:
+        return ""
+    try:
+        messages = [
+            {"role": "system", "content": _PHI3_GENRE_SYSTEM},
+            {"role": "user",   "content": f"Film plot: {plot[:400]}"},
+        ]
+        text   = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = tok(text, return_tensors="pt", truncation=True, max_length=512).to(model.device)
+        with torch.no_grad():
+            out = model.generate(
+                **inputs, max_new_tokens=30, temperature=0.6,
+                do_sample=True, top_p=0.9, pad_token_id=tok.eos_token_id,
+            )
+        new_tok = out[0][inputs["input_ids"].shape[1]:]
+        result  = tok.decode(new_tok, skip_special_tokens=True).strip()
+
+        if len(result.split()) < 4:
+            log.warning("[PromptGen] Phi-3 genre output too short: %s", result)
+            return ""
+        if any(b in result.lower() for b in _PHI3_GENRE_BAD):
+            log.warning("[PromptGen] Phi-3 genre hallucination discarded: %s", result)
+            return ""
+        log.info("[PromptGen] Phi-3 genre/mood for '%s': %s", title, result)
+        return result
+    except Exception as exc:
+        log.debug("[PromptGen] Phi-3 genre inference failed: %s", exc)
+        return ""
 
 
 # -- Template system -----------------------------------------------------------
@@ -308,6 +364,17 @@ class GooferPromptGen:
             prompts.append(result)
             log.info("[PromptGen] goof %d [%s] (%s): %s...",
                      i + 1, category, prompt_mode, result[:80])
+
+        # While Phi-3 is still loaded, infer genre/mood for BackgroundMusic.
+        # Store in _cached_genre_mood so BackgroundMusic can read it without
+        # re-loading Phi-3 (avoids VRAM conflict with LTX-Video + MusicGen).
+        if prompt_mode == "Phi-3-mini" and phi3_model is not None:
+            title = movie_data.get("title", "")
+            plot  = movie_data.get("plot",  "")
+            if title and title not in _cached_genre_mood:
+                gm = _infer_phi3_genre_mood(phi3_model, phi3_tok, title, plot)
+                if gm:
+                    _cached_genre_mood[title] = gm
 
         # Unload Phi-3 so LTX-Video gets full VRAM
         if prompt_mode == "Phi-3-mini":

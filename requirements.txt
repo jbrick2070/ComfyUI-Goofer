@@ -13,6 +13,5 @@ transformers>=4.40.0      # Phi-3-mini-4k-instruct + Flan-T5-small + MusicGen
 accelerate>=0.26.0        # Required for device_map="auto" (Phi-3-mini float16)
 
 # Models downloaded automatically — no manual steps needed:
-#   microsoft/Phi-3-mini-4k-instruct  ~4 GB  (AI prompt generation)
+#   microsoft/Phi-3-mini-4k-instruct  ~4 GB  (AI prompt generation + genre/mood)
 #   facebook/musicgen-large           ~3.3 GB (film score generation)
-#   google/flan-t5-small              ~80 MB  (NSFW AI judge)

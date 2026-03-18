@@ -1,8 +1,8 @@
-﻿"""
+"""
 GooferVideoConcat – Concatenate up to 6 VIDEO clips into one.
 
 Self-contained video stitching node for ComfyUI-Goofer.
-RTX Video Super Resolution upscaler (nvvfx, hardware-accelerated Tensor Cores).
+Upscaler with auto-download: Real-ESRGAN (primary), nvvfx RTX VSR (if installed), bicubic (fallback).
 Crossfade dissolve transitions between clips (configurable overlap).
 
 The VIDEO type is a VideoFromComponents object from comfy_api with methods:
@@ -228,69 +228,146 @@ def _build_video(images, audio, fps):
 # RTX Video Super Resolution
 # ---------------------------------------------------------------------------
 
-def _rtx_upscale(images, target_resolution=1080, quality="ULTRA"):
-    """Upscale frame tensor via NVIDIA RTX Video Super Resolution (nvvfx)."""
-    import time
+def _upscale(images, target_resolution=1080, quality="ULTRA"):
+    """Upscale frame tensor. Tries Real-ESRGAN (auto-downloads), then nvvfx, then bicubic.
 
-    try:
-        import nvvfx
-    except ImportError:
-        raise ImportError(
-            "nvvfx not installed. RTX Video Super Resolution requires "
-            "Nvidia_RTX_Nodes_ComfyUI and its requirements."
-        )
+    Real-ESRGAN: pip install realesrgan — model weights auto-download on first run.
+    nvvfx: Only if NVIDIA VFX SDK is manually installed (optional, faster on RTX GPUs).
+    Bicubic: Always available as a last resort (torch-native, no extra deps).
+    """
+    import time
+    import numpy as np
 
     n_frames, h, w, c = images.shape
     scale = target_resolution / h
     target_w = max(8, round((w * scale) / 8) * 8)
     target_h = max(8, round(target_resolution / 8) * 8)
 
-    logger.info("RTX VSR: %dx%d -> %dx%d (quality=%s) -- %d frames",
-                w, h, target_w, target_h, quality, n_frames)
+    if scale <= 1.0:
+        logger.info("Upscale skipped — target %dp is not larger than source %dp", target_resolution, h)
+        return images
+
     t0 = time.time()
 
-    quality_mapping = {
-        "LOW": nvvfx.effects.QualityLevel.LOW,
-        "MEDIUM": nvvfx.effects.QualityLevel.MEDIUM,
-        "HIGH": nvvfx.effects.QualityLevel.HIGH,
-        "ULTRA": nvvfx.effects.QualityLevel.ULTRA,
-    }
-    selected_quality = quality_mapping.get(quality, nvvfx.effects.QualityLevel.ULTRA)
+    # --- Strategy 1: Real-ESRGAN (auto-downloads model weights) ---
+    try:
+        from realesrgan import RealESRGANer
+        from basicsr.archs.rrdbnet_arch import RRDBNet
 
-    MAX_PIXELS = 1024 * 1024 * 16
-    out_pixels = target_w * target_h
-    batch_size = max(1, MAX_PIXELS // out_pixels)
+        logger.info("Real-ESRGAN: %dx%d -> %dx%d (quality=%s) -- %d frames",
+                    w, h, target_w, target_h, quality, n_frames)
 
-    upscaled_batches = []
+        # RealESRGAN_x4plus — auto-downloads ~64MB model from GitHub releases
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                        num_block=23, num_grow_ch=32, scale=4)
 
-    with nvvfx.VideoSuperRes(selected_quality) as sr:
-        sr.output_width = target_w
-        sr.output_height = target_h
-        sr.load()
+        tile_sizes = {"LOW": 256, "MEDIUM": 384, "HIGH": 512, "ULTRA": 640}
+        tile = tile_sizes.get(quality, 512)
 
-        for i in range(0, n_frames, batch_size):
-            batch = images[i:i + batch_size]
-            batch_cuda = batch.cuda().permute(0, 3, 1, 2).contiguous()
+        upsampler = RealESRGANer(
+            scale=4,
+            model_path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+            model=model,
+            tile=tile,
+            tile_pad=10,
+            pre_pad=0,
+            half=torch.cuda.is_available(),
+        )
 
-            batch_outputs = []
-            for j in range(batch_cuda.shape[0]):
-                input_frame = batch_cuda[j]
-                dlpack_out = sr.run(input_frame).image
-                output = torch.from_dlpack(dlpack_out).clone()
-                batch_outputs.append(output)
+        upscaled_frames = []
+        for i in range(n_frames):
+            # float [0,1] RGB NHWC -> uint8 BGR for ESRGAN
+            frame = (images[i].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            frame_bgr = frame[:, :, ::-1].copy()
 
-            batch_out_tensor = torch.stack(batch_outputs, dim=0)
-            batch_out_tensor = batch_out_tensor.permute(0, 2, 3, 1).cpu()
-            upscaled_batches.append(batch_out_tensor)
+            output_bgr, _ = upsampler.enhance(frame_bgr, outscale=scale)
 
-    upscaled = torch.cat(upscaled_batches, dim=0)
-    torch.cuda.empty_cache()
+            # uint8 BGR -> float [0,1] RGB
+            output_rgb = output_bgr[:, :, ::-1].copy().astype(np.float32) / 255.0
+            upscaled_frames.append(torch.from_numpy(output_rgb))
+
+            if (i + 1) % 20 == 0 or i == n_frames - 1:
+                logger.info("  Real-ESRGAN progress: %d/%d frames", i + 1, n_frames)
+
+        # Cleanup ESRGAN model from VRAM
+        del upsampler
+        torch.cuda.empty_cache()
+
+        result = torch.stack(upscaled_frames, dim=0)
+        elapsed = time.time() - t0
+        logger.info("Real-ESRGAN done in %.1fs (%.2f fps, %d frames -> %dx%d)",
+                    elapsed, n_frames / elapsed if elapsed > 0 else 0,
+                    n_frames, result.shape[2], result.shape[1])
+        return result
+
+    except ImportError:
+        logger.info("Real-ESRGAN not installed (pip install realesrgan). Trying fallbacks...")
+    except Exception as e:
+        logger.warning("Real-ESRGAN failed: %s. Trying fallbacks...", e)
+
+    # --- Strategy 2: nvvfx (NVIDIA VFX SDK, if manually installed) ---
+    try:
+        import nvvfx
+
+        logger.info("nvvfx RTX VSR: %dx%d -> %dx%d (quality=%s) -- %d frames",
+                    w, h, target_w, target_h, quality, n_frames)
+
+        quality_mapping = {
+            "LOW": nvvfx.effects.QualityLevel.LOW,
+            "MEDIUM": nvvfx.effects.QualityLevel.MEDIUM,
+            "HIGH": nvvfx.effects.QualityLevel.HIGH,
+            "ULTRA": nvvfx.effects.QualityLevel.ULTRA,
+        }
+        selected_quality = quality_mapping.get(quality, nvvfx.effects.QualityLevel.ULTRA)
+
+        MAX_PIXELS = 1024 * 1024 * 16
+        out_pixels = target_w * target_h
+        batch_size = max(1, MAX_PIXELS // out_pixels)
+        upscaled_batches = []
+
+        with nvvfx.VideoSuperRes(selected_quality) as sr:
+            sr.output_width = target_w
+            sr.output_height = target_h
+            sr.load()
+
+            for i in range(0, n_frames, batch_size):
+                batch = images[i:i + batch_size]
+                batch_cuda = batch.cuda().permute(0, 3, 1, 2).contiguous()
+                batch_outputs = []
+                for j in range(batch_cuda.shape[0]):
+                    dlpack_out = sr.run(batch_cuda[j]).image
+                    batch_outputs.append(torch.from_dlpack(dlpack_out).clone())
+                batch_out = torch.stack(batch_outputs, dim=0).permute(0, 2, 3, 1).cpu()
+                upscaled_batches.append(batch_out)
+
+        result = torch.cat(upscaled_batches, dim=0)
+        torch.cuda.empty_cache()
+
+        elapsed = time.time() - t0
+        logger.info("nvvfx VSR done in %.1fs (%.2f fps, %d frames -> %dx%d)",
+                    elapsed, n_frames / elapsed if elapsed > 0 else 0,
+                    n_frames, target_w, target_h)
+        return result
+
+    except ImportError:
+        logger.info("nvvfx not installed. Falling back to bicubic...")
+    except Exception as e:
+        logger.warning("nvvfx failed: %s. Falling back to bicubic...", e)
+
+    # --- Strategy 3: Torch bicubic (always available, lower quality) ---
+    logger.info("Bicubic upscale: %dx%d -> %dx%d -- %d frames", w, h, target_w, target_h, n_frames)
+
+    imgs_nchw = images.permute(0, 3, 1, 2)  # NHWC -> NCHW
+    upscaled = torch.nn.functional.interpolate(
+        imgs_nchw, size=(target_h, target_w),
+        mode="bicubic", align_corners=False,
+    ).clamp(0, 1)
+    result = upscaled.permute(0, 2, 3, 1)  # NCHW -> NHWC
 
     elapsed = time.time() - t0
-    fps_rate = n_frames / elapsed if elapsed > 0 else 0
-    logger.info("RTX VSR done in %.1fs (%.2f fps, %d frames -> %dx%d)",
-                elapsed, fps_rate, n_frames, target_w, target_h)
-    return upscaled
+    logger.info("Bicubic upscale done in %.1fs (%d frames -> %dx%d)",
+                elapsed, n_frames, target_w, target_h)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -430,11 +507,11 @@ class GooferVideoConcat:
             "required": {
                 "video_1": ("VIDEO",),
                 "upscale_4k": (["disabled", "enabled"], {"default": "disabled",
-                               "tooltip": "Upscale final video via NVIDIA RTX Video Super Resolution"}),
+                               "tooltip": "Upscale final video. Uses Real-ESRGAN (auto-downloads), nvvfx (if installed), or bicubic fallback."}),
                 "upscale_resolution": (["1080", "1440", "2160", "4320"], {"default": "1080",
                                        "tooltip": "Target height: 1080=HD, 1440=2K, 2160=4K, 4320=8K"}),
                 "upscale_quality": (["LOW", "MEDIUM", "HIGH", "ULTRA"], {"default": "ULTRA",
-                                    "tooltip": "RTX VSR quality. ULTRA = best, LOW = fastest."}),
+                                    "tooltip": "Upscale quality. ULTRA = best, LOW = fastest. Affects tile size for Real-ESRGAN."}),
             },
             "optional": {
                 "video_2": ("VIDEO",),
@@ -502,15 +579,13 @@ class GooferVideoConcat:
 
         if upscale_4k == "enabled":
             try:
-                combined_images = _rtx_upscale(
+                combined_images = _upscale(
                     combined_images,
                     target_resolution=int(upscale_resolution),
                     quality=upscale_quality,
                 )
-            except ImportError as e:
-                logger.warning("GooferVideoConcat: nvvfx not available -- %s. Skipping upscale.", e)
             except Exception as e:
-                logger.error("GooferVideoConcat: RTX VSR failed: %s", e)
+                logger.error("GooferVideoConcat: upscale failed: %s", e)
 
         total_frames = combined_images.shape[0]
         logger.info("GooferVideoConcat: result = %d frames, %.1fs at %.0f fps",

@@ -1,4 +1,4 @@
-{
+﻿{
     "id":  "1e6364a9-0041-40d0-aa70-4ad95397381b",
     "revision":  0,
     "last_node_id":  14,
@@ -489,9 +489,8 @@
                                   ],
                       "widgets_values":  [
                                              "enabled",
+                                             "1080",
                                              "ULTRA",
-                                             1920,
-                                             1080,
                                              12
                                          ],
                       "properties":  {
@@ -1070,7 +1069,7 @@
                   "info":  {
                                "name":  "Goofer Basic Workflow",
                                "author":  "Jeffrey A. Brick",
-                               "description":  "Movie goof video generator â€” fetches goofs, sanitizes, generates video clips, stitches with procedural art"
+                               "description":  "Movie goof video generator Ã¢â‚¬â€ fetches goofs, sanitizes, generates video clips, stitches with procedural art"
                            }
               },
     "version":  0.4

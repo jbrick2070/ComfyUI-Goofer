@@ -113,13 +113,11 @@ class _GooferConcatVideo:
         self._fps = float(fps)
 
     def get_components(self):
-        class _VC:
-            pass
-        vc = _VC()
-        vc.images = self._images
-        vc.audio = self._audio
-        vc.fps = self._fps
-        return vc
+        return {
+            "images": self._images,
+            "audio": self._audio,
+            "fps": self._fps,
+        }
 
     def get_dimensions(self):
         return (int(self._images.shape[2]), int(self._images.shape[1]))
@@ -150,7 +148,9 @@ class _GooferConcatVideo:
             container = av.open(str(path), mode='w')
             w, h = self.get_dimensions()
 
-            video_stream = container.add_stream('h264', rate=int(self._fps))
+            from fractions import Fraction
+            fps_frac = Fraction(self._fps).limit_denominator(10000)
+            video_stream = container.add_stream('h264', rate=fps_frac)
             video_stream.width = w
             video_stream.height = h
             video_stream.pix_fmt = 'yuv420p'
@@ -170,11 +170,14 @@ class _GooferConcatVideo:
                             wf = wf.unsqueeze(0)
                         wf_np = wf.numpy()
                         n_channels = wf_np.shape[0]
-                        layout = 'stereo' if n_channels >= 2 else 'mono'
+                        layout_str = 'stereo' if n_channels >= 2 else 'mono'
                         if n_channels >= 2:
                             wf_np = wf_np[:2]
                         audio_stream = container.add_stream('aac', rate=sample_rate)
-                        audio_stream.layout = layout
+                        try:
+                            audio_stream.layout = av.AudioLayout(layout_str)
+                        except (TypeError, AttributeError):
+                            audio_stream.layout = layout_str
                 except Exception as ae:
                     logger.warning("_GooferConcatVideo: audio setup failed: %s", ae)
                     audio_stream = None
@@ -300,6 +303,18 @@ def _upscale(images, target_resolution=1080, quality="ULTRA"):
         torch.cuda.empty_cache()
 
         result = torch.stack(upscaled_frames, dim=0)
+
+        # Real-ESRGAN outscale can produce approximate dimensions;
+        # resize to exact target so output matches nvvfx/bicubic paths.
+        if result.shape[1] != target_h or result.shape[2] != target_w:
+            logger.info("Real-ESRGAN: resizing %dx%d -> exact %dx%d",
+                        result.shape[2], result.shape[1], target_w, target_h)
+            result = torch.nn.functional.interpolate(
+                result.permute(0, 3, 1, 2),
+                size=(target_h, target_w),
+                mode="bicubic", align_corners=False,
+            ).clamp(0, 1).permute(0, 2, 3, 1)
+
         elapsed = time.time() - t0
         logger.info("Real-ESRGAN done in %.1fs (%.2f fps, %d frames -> %dx%d)",
                     elapsed, n_frames / elapsed if elapsed > 0 else 0,
@@ -439,6 +454,20 @@ def _crossfade_audio(audio_list, overlap_frames, fps):
     sr = valid[0].get("sample_rate", 44100)
     overlap_samples = int((overlap_frames / fps) * sr)
     waveforms = [a["waveform"] for a in valid]
+
+    # Normalize channel counts — expand mono to match max channels so cat won't fail
+    max_ch = max(wf.shape[-2] if wf.dim() >= 2 else 1 for wf in waveforms)
+    normalised = []
+    for wf in waveforms:
+        if wf.dim() == 1:
+            wf = wf.unsqueeze(0)
+        if wf.dim() == 2 and wf.shape[0] < max_ch:
+            wf = wf.expand(max_ch, -1).contiguous()
+        elif wf.dim() == 3 and wf.shape[1] < max_ch:
+            wf = wf.expand(-1, max_ch, -1).contiguous()
+        normalised.append(wf)
+    waveforms = normalised
+
     result_parts = []
 
     for i, wf in enumerate(waveforms):
@@ -485,7 +514,18 @@ def _concat_audio(audio_list):
     if all(isinstance(a, dict) and "waveform" in a for a in valid):
         sr = valid[0].get("sample_rate", 44100)
         waveforms = [a["waveform"] for a in valid]
-        combined = torch.cat(waveforms, dim=-1)
+        # Normalize channel counts before concat
+        max_ch = max(wf.shape[-2] if wf.dim() >= 2 else 1 for wf in waveforms)
+        norm_wf = []
+        for wf in waveforms:
+            if wf.dim() == 1:
+                wf = wf.unsqueeze(0)
+            if wf.dim() == 2 and wf.shape[0] < max_ch:
+                wf = wf.expand(max_ch, -1).contiguous()
+            elif wf.dim() == 3 and wf.shape[1] < max_ch:
+                wf = wf.expand(-1, max_ch, -1).contiguous()
+            norm_wf.append(wf)
+        combined = torch.cat(norm_wf, dim=-1)
         return {"waveform": combined, "sample_rate": sr}
     if all(isinstance(a, torch.Tensor) for a in valid):
         return torch.cat(valid, dim=-1)
@@ -535,10 +575,15 @@ class GooferVideoConcat:
                     upscale_quality="ULTRA", video_2=None, video_3=None, video_4=None,
                     video_5=None, video_6=None, crossfade_frames=0):
         clips = [v for v in [video_1, video_2, video_3, video_4, video_5, video_6] if v is not None]
-        logger.info("GooferVideoConcat: concatenating %d clips", len(clips))
+        logger.info("GooferVideoConcat: concatenating %d clips (crossfade=%d)",
+                    len(clips), crossfade_frames)
 
         if len(clips) == 1 and upscale_4k != "enabled":
             return (clips[0],)
+
+        # Validate crossfade_frames: ensure it can't exceed half of any clip's length.
+        # This prevents empty tensors or garbage output from the crossfade logic.
+        crossfade_frames = max(0, int(crossfade_frames))
 
         all_images = []
         all_audio = []
@@ -553,6 +598,15 @@ class GooferVideoConcat:
             all_audio.append(audio)
             if i == 0:
                 fps = clip_fps
+
+        # Clamp crossfade to half the shortest clip so we never produce empty tensors
+        if crossfade_frames > 0 and len(all_images) > 1:
+            min_frames = min(img.shape[0] for img in all_images if isinstance(img, torch.Tensor))
+            safe_overlap = min_frames // 2
+            if crossfade_frames > safe_overlap:
+                logger.warning("Crossfade %d exceeds safe limit (%d); clamping to %d",
+                               crossfade_frames, safe_overlap, safe_overlap)
+                crossfade_frames = safe_overlap
 
         # Resize mismatched spatial dims
         if all(isinstance(img, torch.Tensor) for img in all_images):

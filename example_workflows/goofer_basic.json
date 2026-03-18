@@ -431,7 +431,7 @@
                   },
                   {
                       "id":  7,
-                      "type":  "DMM_VideoConcat",
+                      "type":  "GooferVideoConcat",
                       "pos":  [
                                   2150,
                                   350
@@ -494,7 +494,7 @@
                                              12
                                          ],
                       "properties":  {
-                                         "Node name for S\u0026R":  "DMM_VideoConcat"
+                                         "Node name for S\u0026R":  "GooferVideoConcat"
                                      },
                       "title":  "Stitch + RTX Upscale"
                   },
@@ -1074,3 +1074,4 @@
               },
     "version":  0.4
 }
+

@@ -1,5 +1,5 @@
-"""
-ComfyUI-Goofer — Movie Goof Video Generator
+﻿"""
+ComfyUI-Goofer â€” Movie Goof Video Generator
 
 Finds IMDB-style goofs in a movie, generates copyright-safe video prompts,
 creates cinematic video clips from each goof, stitches them with procedural
@@ -20,6 +20,7 @@ from .goofer_procedural_clip import GooferProceduralClip
 from .goofer_batch_video import GooferBatchVideo
 from .goofer_background_music import GooferBackgroundMusic
 from .goofer_audio_enhance import GooferAudioEnhance
+from .goofer_video_concat import GooferVideoConcat
 
 
 NODE_CLASS_MAPPINGS = {
@@ -31,6 +32,7 @@ NODE_CLASS_MAPPINGS = {
     "GooferBatchVideo":      GooferBatchVideo,
     "GooferBackgroundMusic": GooferBackgroundMusic,
     "GooferAudioEnhance":    GooferAudioEnhance,
+    "GooferVideoConcat":     GooferVideoConcat,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -42,8 +44,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GooferBatchVideo":      "Goofer: Batch Video",
     "GooferBackgroundMusic": "Goofer: Background Music",
     "GooferAudioEnhance":    "Goofer: Audio Enhance",
+    "GooferVideoConcat":     "Goofer: Stitch + RTX Upscale",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
 
 WEB_DIRECTORY = None
+

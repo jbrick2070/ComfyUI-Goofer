@@ -40,7 +40,9 @@ def _extract_components(video_obj):
         audio = None
 
         if isinstance(components, dict):
-            images = components.get("images") or components.get("frames")
+            images = components.get("images")
+            if images is None:
+                images = components.get("frames")
             audio = components.get("audio")
             fps = float(components.get("fps", fps))
         elif isinstance(components, (tuple, list)):
@@ -51,7 +53,9 @@ def _extract_components(video_obj):
             if len(components) >= 3 and isinstance(components[2], (int, float)):
                 fps = float(components[2])
         else:
-            images = getattr(components, "images", None) or getattr(components, "frames", None)
+            images = getattr(components, "images", None)
+            if images is None:
+                images = getattr(components, "frames", None)
             audio = getattr(components, "audio", None)
             fps_val = getattr(components, "fps", None)
             if fps_val is not None:
@@ -81,7 +85,9 @@ def _extract_components(video_obj):
                 return val, audio, fps
 
     if isinstance(video_obj, dict):
-        images = video_obj.get("images") or video_obj.get("frames")
+        images = video_obj.get("images")
+        if images is None:
+            images = video_obj.get("frames")
         audio = video_obj.get("audio")
         fps = float(video_obj.get("fps", 30.0))
         if images is not None:

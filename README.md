@@ -117,6 +117,7 @@ GooferBatchVideo                                  │
 | **GooferBatchVideo** | Feeds each prompt to LTX-Video and renders one video clip per goof. Configurable resolution, frame count, and guidance strength per clip |
 | **GooferBackgroundMusic** | Generates a film score with Meta MusicGen 3. Prompt is derived from actual goof keywords (explosions → percussive bass, chases → driving rhythm, basketball → upbeat brass, etc.) plus Flan-T5-small genre/mood inference from the film's plot. Falls back to additive-synthesis chord progression if MusicGen is unavailable |
 | **GooferProceduralClip** | Renders a data-viz interstitial showing goof metadata as animated neon graphics. Duration syncs to the MusicGen output length via the `music_duration` input |
+| **GooferVideoConcat** *(Stitch + Upscale)* | Concatenates up to 6 VIDEO clips with optional crossfade dissolve transitions. 3-tier upscaler: nvvfx RTX VSR (primary, hardware-accelerated), Real-ESRGAN (fallback, auto-downloads ~64 MB model), bicubic (last resort). Default target: 1080p |
 | **GooferAudioEnhance** | Optional EQ / loudness normalization pass on the final audio mix |
 
 ---
@@ -224,14 +225,14 @@ Run Goofer as a live generative broadcast — each output video auto-loads into 
 
 ---
 
-## Content Policy � No NSFW / Explicit Content
+## Content Policy � No NSFW / Explicit Content
 
 ComfyUI-Goofer includes a mandatory two-stage explicit content filter built into the **Copyright Cleaner** (GooferSanitizer) node. It runs on every goof before any text reaches LTX-Video or MusicGen.
 
-**Stage 1 � Keyword & Pattern Block (always on)**
+**Stage 1 � Keyword & Pattern Block (always on)**
 Any goof containing explicit sexual terms, nudity references, graphic gore, or child-safety violations is silently dropped and logged. It never reaches the prompt generator.
 
-**Stage 2 � AI Judge (Flan-T5, default on)**
+**Stage 2 � AI Judge (Flan-T5, default on)**
 Borderline goofs containing words like "bare", "intimate", "strip", or "shower" are passed to Flan-T5-small with the instruction: *"Is this description appropriate for all audiences and free from sexual or explicit content?"* If the answer is "no", the goof is dropped.
 
 This filter cannot be disabled from the workflow UI. The only override is editing the source directly, which you should not do unless you are using Goofer with fully public-domain films in a verified adult-only context compliant with all applicable laws.
@@ -246,6 +247,11 @@ requests
 transformers>=4.40.0
 torch>=2.0.0
 numpy
+```
+
+Optional (for Real-ESRGAN upscaling fallback — auto-downloads model weights on first run):
+```
+realesrgan
 ```
 
 Optional (for higher-quality audio resampling):

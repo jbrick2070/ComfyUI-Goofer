@@ -260,6 +260,12 @@ def _upscale(images, target_resolution=1080, quality="ULTRA"):
 
     # --- Strategy 1: Real-ESRGAN (auto-downloads model weights) ---
     try:
+        # torchvision >= 0.16 removed functional_tensor; patch it before basicsr imports it
+        import sys as _sys
+        import torchvision.transforms.functional as _tvtf
+        if "torchvision.transforms.functional_tensor" not in _sys.modules:
+            _sys.modules["torchvision.transforms.functional_tensor"] = _tvtf
+
         from realesrgan import RealESRGANer
         from basicsr.archs.rrdbnet_arch import RRDBNet
 

@@ -1,4 +1,4 @@
-# ComfyUI-Goofer v1.0
+# ComfyUI-Goofer v1.1
 ## IMDb Goof-to-Video Pipeline
 
 **Random IMDb movie goof → AI video prompt → LTX-2 video clips → procedural interstitial → MusicGen film score → final stitched video.**
@@ -9,9 +9,9 @@ Fully automated. Zero API keys. Drop into `custom_nodes/` and queue.
 
 ## Download
 
-[![Download Goofer v1.0](https://img.shields.io/badge/Download-Goofer_v1.0-blue?style=for-the-badge)](https://github.com/jbrick2070/ComfyUI-Goofer/releases)
+[![Download Goofer v1.1](https://img.shields.io/badge/Download-Goofer_v1.1-blue?style=for-the-badge)](https://github.com/jbrick2070/ComfyUI-Goofer/releases)
 
-**[Click here to download the full package (v1.0)](https://github.com/jbrick2070/ComfyUI-Goofer/releases)** — includes workflow JSON + this guide.
+**[Click here to download the full package (v1.1)](https://github.com/jbrick2070/ComfyUI-Goofer/releases)** — includes workflow JSON + this guide.
 
 ---
 
@@ -82,6 +82,8 @@ pip install cinemagoer requests transformers torch
 | Minimum | RTX 4070 / 3060 | 8 GB |
 
 > **Check your VRAM:** Windows: Task Manager (Ctrl+Shift+Esc) → Performance → GPU → Dedicated GPU Memory. Linux: `nvidia-smi`
+> 
+> **Note on 8GB VRAM:** v1.1 increased the default clip generation resolution to `1024x576` for true 16:9 widescreen output. If you encounter CUDA Out of Memory errors during rendering, drop the `width` and `height` widgets on `GooferBatchVideo` and `GooferProceduralClip` back down to `768` and `512`.
 
 ---
 
@@ -112,9 +114,9 @@ GooferBatchVideo                                  │
 |------|-------------|
 | **GooferInit** | Sets global config: output path, upscale mode, seed |
 | **GooferGoofFetch** | Picks a random film from 424 titles, fetches goofs from IMDb via Cinemagoer + direct HTTP fallback. Seed-diversified so every run draws a fresh subset from the full goof pool |
-| **GooferSanitizer** *(Copyright Cleaner)* | Strips copyrighted character names, actor names, studio names, brand names, and franchise references from all goof text before it reaches any AI model |
-| **GooferPromptGen** | Converts sanitized goof descriptions into cinematic LTX-2 video prompts using category-aware templates (continuity errors → observational style, factual errors → documentary style, etc.) |
-| **GooferBatchVideo** | Feeds each prompt to LTX-Video and renders one video clip per goof. Configurable resolution, frame count, and guidance strength per clip |
+| **GooferSanitizer** *(Copyright Cleaner)* | Strips copyrighted names, brands, and franchises. Now includes the robust **Banana Filter** which humorously intercepts and replaces all firearms, heavy weaponry, and violent verbs with bananas before reaching any AI model |
+| **GooferPromptGen** | Converts sanitized goofs into cinematic LTX-2 prompts. v1.1 forces the exact mistake to be the central focal point of the scene and dynamically injects cinematic tracking/lighting highlight styles to explicitly point out the error |
+| **GooferBatchVideo** | Feeds each prompt to LTX-Video and renders one video clip per goof. v1.1 defaults to native 16:9 output at `1024x576`, alongside configurable frame counts and guidance strengths |
 | **GooferBackgroundMusic** | Generates a film score with Meta MusicGen 3. Prompt is derived from actual goof keywords (explosions → percussive bass, chases → driving rhythm, basketball → upbeat brass, etc.) plus Flan-T5-small genre/mood inference from the film's plot. Falls back to additive-synthesis chord progression if MusicGen is unavailable |
 | **GooferProceduralClip** | Renders a data-viz interstitial showing goof metadata as animated neon graphics. Duration syncs to the MusicGen output length via the `music_duration` input |
 | **GooferVideoConcat** *(Stitch + Upscale)* | Concatenates up to 6 VIDEO clips with optional crossfade dissolve transitions. 3-tier upscaler: nvvfx RTX VSR (primary, hardware-accelerated), Real-ESRGAN (fallback, auto-downloads ~64 MB model), bicubic (last resort). Default target: 1080p |

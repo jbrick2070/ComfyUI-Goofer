@@ -77,23 +77,36 @@ _PHI3_SYSTEM = (
     "3. No real actor names, character names, film titles, brand names, or studio names.\n"
     "4. Between 40 and 80 words.\n"
     "5. Always specify camera movement, lighting quality, and visual style.\n"
+    "6. The core objective is to visibly recreate the exact film mistake or continuity error described. The mistake itself MUST be the central visual focus of the clip.\n"
+    "7. CRITICAL: All characters must hold and use bananas instead of weapons. Do not include any guns, firearms, or knives in your output. Replace all implied weapons with bananas.\n"
 )
+
+_HIGHLIGHT_STYLES = [
+    "A glowing futuristic targeting HUD suddenly locks onto the mistake.",
+    "A sudden stark spotlight beam illuminates the error in extreme contrast.",
+    "The scene abruptly drops into extreme slow-motion as the mistake occurs.",
+    "A fast snap-zoom and sudden rack focus directly onto the error, heavily blurring the background.",
+    "A bright glowing outline or neon aura begins pulsating around the mistake.",
+    "A dramatic cinematic camera push-in isolates the mistake as the rest of the frame darkens."
+]
 
 _PHI3_USER_TMPL = (
     "Film goof category: {category}\n"
     "Goof description: {description}\n\n"
-    "Write a cinematic 5-second text-to-video prompt inspired by this goof. "
+    "Write a cinematic 5-second text-to-video prompt that explicitly and visually recreates this exact film mistake. "
+    "Describe the scene such that the error itself is clearly visible and is the focal point. "
+    "Crucial visual requirement: {highlight}\n"
     "Visual style: {style}."
 )
 
 _PHI3_BAD = ["i cannot", "i can't", "i'm sorry", "i apologize", "as an ai"]
 
 
-def _phi3_prompt(model, tok, category: str, description: str, style: str) -> str:
+def _phi3_prompt(model, tok, category: str, description: str, style: str, highlight: str) -> str:
     """Generate one LTX-Video prompt via Phi-3-mini. Returns '' on failure."""
     import torch
     msg = _PHI3_USER_TMPL.format(
-        category=category, description=description[:300], style=style
+        category=category, description=description[:300], style=style, highlight=highlight
     )
     messages = [
         {"role": "system", "content": _PHI3_SYSTEM},
@@ -350,7 +363,8 @@ class GooferPromptGen:
             description = goof.get("description", "a filmmaking error")
 
             if prompt_mode == "Phi-3-mini":
-                result = _phi3_prompt(phi3_model, phi3_tok, category, description, style_name)
+                highlight = rng.choice(_HIGHLIGHT_STYLES)
+                result = _phi3_prompt(phi3_model, phi3_tok, category, description, style_name, highlight)
                 if not result:
                     # Template fallback if Phi-3 output is bad or refused
                     result = _template_prompt(rng, category, description, style_prefix)

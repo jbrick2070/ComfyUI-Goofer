@@ -697,7 +697,7 @@
                                       }
                                   ],
                       "widgets_values":  [
-                                             "ltx-2.3-22b-lora-camera-control-dolly-left.safetensors",
+                                             "ltx-2-19b-lora-camera-control-dolly-left.safetensors",
                                              0.7
                                          ],
                       "properties":  {

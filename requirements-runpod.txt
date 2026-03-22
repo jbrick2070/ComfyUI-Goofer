@@ -1,0 +1,20 @@
+# ComfyUI-Goofer — RunPod / Linux NVIDIA TensorRT requirements
+# Install AFTER base requirements.txt:
+#   pip install -r requirements.txt
+#   pip install -r requirements-runpod.txt
+#
+# CRITICAL: The --extra-index-url MUST match your CUDA toolkit.
+#   RunPod default (March 2026): CUDA 12.8 → cu128
+#   Check yours:  nvcc --version
+#
+# If you see "libcudart.so.13: cannot open shared object file"
+# you installed the wrong CUDA build. Uninstall and reinstall
+# with the correct index URL below.
+
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# NVIDIA TensorRT — compiled for tensor cores (Blackwell, Ada, Hopper)
+torch-tensorrt>=2.2.0
+
+# Ensure torchaudio matches PyTorch CUDA build
+torchaudio>=2.0.0

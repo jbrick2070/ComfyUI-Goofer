@@ -11,7 +11,10 @@ opencv-python>=4.8.0      # Optional: denoise/frame prep (graceful fallback)
 # Upscaling — NVIDIA hardware chain
 realesrgan>=0.3.0         # Real-ESRGAN upscaler (auto-downloads ~64 MB model)
 basicsr>=1.4.2            # Required by Real-ESRGAN
-torch-tensorrt>=2.2.0     # NVIDIA TensorRT acceleration (Linux/RunPod — uses tensor cores)
+# NOTE: torch-tensorrt moved to requirements-runpod.txt
+# It MUST match your CUDA toolkit version (cu128/cu130).
+# Installing the wrong build causes libcudart.so errors.
+# On RunPod/Linux:  pip install -r requirements-runpod.txt
 
 # Prompt generation (Qwen2.5 mode) — models auto-download on first use
 transformers>=4.37.0      # Qwen2.5-Instruct + MusicGen

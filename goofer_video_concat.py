@@ -387,10 +387,21 @@ def _upscale(images, target_resolution=1080, quality="ULTRA"):
                     n_frames, result.shape[2], result.shape[1])
         return result
 
-    except ImportError:
-        logger.info("torch-tensorrt not installed. Trying standard Real-ESRGAN...")
+    except ImportError as ie:
+        logger.warning(
+            "torch-tensorrt NOT INSTALLED — falling back to standard Real-ESRGAN. "
+            "To fix: pip install -r requirements-runpod.txt  (import error: %s)", ie
+        )
+        print(
+            "[VideoConcat] WARNING: torch-tensorrt not found! Using slow Real-ESRGAN fallback.\n"
+            "[VideoConcat] Fix: pip install -r requirements-runpod.txt"
+        )
     except Exception as e:
-        logger.warning("TensorRT path failed: %s. Trying standard Real-ESRGAN...", e)
+        logger.warning(
+            "TensorRT path FAILED: %s — falling back to standard Real-ESRGAN. "
+            "Check CUDA version matches torch-tensorrt build (nvcc --version).", e
+        )
+        print(f"[VideoConcat] WARNING: TensorRT failed: {e}. Using Real-ESRGAN fallback.")
 
     # --- Strategy 3: Real-ESRGAN via PyTorch CUDA (no TensorRT) ---
     try:

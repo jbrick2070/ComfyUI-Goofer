@@ -51,29 +51,37 @@ def install():
     req_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
     _pip("install", "-r", req_file)
 
-    # On Linux with NVIDIA GPU, install TensorRT with correct CUDA index
+    # On Linux with NVIDIA GPU, install TensorRT with correct CUDA index if CUDA 13+
     if platform.system() == "Linux":
         cuda_ver = _get_cuda_version()
         if cuda_ver:
-            index_url = f"https://download.pytorch.org/whl/cu{cuda_ver}"
             print(f"[ComfyUI-Goofer] Linux detected, CUDA {cuda_ver}")
-            print(f"[ComfyUI-Goofer] Installing torch-tensorrt from {index_url}")
-            try:
-                _pip(
-                    "install", "torch-tensorrt", "torchaudio",
-                    "--extra-index-url", index_url,
-                )
-                print("[ComfyUI-Goofer] TensorRT installed — NVIDIA upscaler will activate.")
-            except subprocess.CalledProcessError as e:
-                print(f"[ComfyUI-Goofer] WARNING: torch-tensorrt install failed: {e}")
-                print("[ComfyUI-Goofer] Upscaler will fall back to Real-ESRGAN.")
+
+            # TensorRT requires CUDA 13+
+            if cuda_ver.startswith("13") or cuda_ver.startswith("14"):
+                index_url = f"https://download.pytorch.org/whl/cu{cuda_ver}"
+                print(f"[ComfyUI-Goofer] Installing torch-tensorrt from {index_url}")
+                print("[ComfyUI-Goofer] (TensorRT enables NVIDIA tensor core optimization for Real-ESRGAN)")
+                try:
+                    _pip(
+                        "install", "torch-tensorrt", "torchaudio",
+                        "--extra-index-url", index_url,
+                    )
+                    print("[ComfyUI-Goofer] ✓ TensorRT installed — tensor core acceleration enabled.")
+                except subprocess.CalledProcessError as e:
+                    print(f"[ComfyUI-Goofer] WARNING: torch-tensorrt install failed: {e}")
+                    print("[ComfyUI-Goofer] Upscaler will use standard Real-ESRGAN (still NVIDIA GPU-accelerated).")
+            else:
+                print(f"[ComfyUI-Goofer] CUDA {cuda_ver} detected (CUDA 12.x)")
+                print("[ComfyUI-Goofer] TensorRT requires CUDA 13+, skipping.")
+                print("[ComfyUI-Goofer] Upscaler will use Real-ESRGAN (standard NVIDIA CUDA acceleration).")
         else:
             print("[ComfyUI-Goofer] No CUDA toolkit found (nvcc missing).")
-            print("[ComfyUI-Goofer] Skipping torch-tensorrt. Upscaler will use Real-ESRGAN.")
+            print("[ComfyUI-Goofer] Upscaler will use Real-ESRGAN.")
     else:
         print("[ComfyUI-Goofer] Windows detected — using nvvfx RTX VSR (no torch-tensorrt needed).")
 
-    print("[ComfyUI-Goofer] Install complete.")
+    print("[ComfyUI-Goofer] ✓ Install complete.")
 
 
 if __name__ == "__main__":

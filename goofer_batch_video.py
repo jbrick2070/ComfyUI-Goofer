@@ -188,7 +188,7 @@ class GooferBatchVideo:
                 "height": ("INT", {"default": 512, "min": 64, "max": 2048, "step": 32}),
                 "length": ("INT", {"default": 61, "min": 9, "max": 257, "step": 8,
                                    "tooltip": "Number of frames (pixel-space)"}),
-                "fps": ("INT", {"default": 25, "min": 1, "max": 60}),
+                "fps": ("INT", {"default": 35, "min": 1, "max": 60}),
                 "crf": ("INT", {"default": 30, "min": 0, "max": 51,
                                 "tooltip": "CreateVideo CRF quality"}),
                 "vram_resident": (["enabled", "disabled"], {"default": "enabled",

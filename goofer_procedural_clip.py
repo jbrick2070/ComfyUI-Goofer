@@ -452,7 +452,7 @@ class GooferProceduralClip:
         from PIL import Image
         import random
 
-        fps = 25  # hardcoded — must match LTX-Video pipeline default
+        fps = 35  # hardcoded — must match LTX-Video pipeline default
 
         # If the music node passed its duration, use that instead of the widget
         if music_duration is not None and float(music_duration) > 0.0:

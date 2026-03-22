@@ -2,7 +2,12 @@
 GooferVideoConcat – Concatenate up to 6 VIDEO clips into one.
 
 Self-contained video stitching node for ComfyUI-Goofer.
-Upscaler with auto-download: Real-ESRGAN (primary), nvvfx RTX VSR (if installed), bicubic (fallback).
+Upscaler priority chain:
+  1. nvvfx RTX VSR (Windows, NVIDIA VFX SDK)
+  2. TensorRT-accelerated Real-ESRGAN (Linux/RunPod, NVIDIA tensor cores)
+  3. Real-ESRGAN via PyTorch CUDA (fallback)
+  4. Bicubic (always available)
+
 Crossfade dissolve transitions between clips (configurable overlap).
 
 The VIDEO type is a VideoFromComponents object from comfy_api with methods:
@@ -303,11 +308,91 @@ def _upscale(images, target_resolution=1080, quality="ULTRA"):
         return result
 
     except ImportError:
-        logger.info("nvvfx not installed. Trying Real-ESRGAN...")
+        logger.info("nvvfx not installed (Windows-only). Trying NVIDIA TensorRT path...")
     except Exception as e:
-        logger.warning("nvvfx failed: %s. Trying Real-ESRGAN...", e)
+        logger.warning("nvvfx failed: %s. Trying NVIDIA TensorRT path...", e)
 
-    # --- Strategy 2: Real-ESRGAN (auto-downloads model weights, frame-by-frame) ---
+    # --- Strategy 2: TensorRT-accelerated Real-ESRGAN (NVIDIA tensor cores on Linux) ---
+    try:
+        import torch_tensorrt  # noqa: F811
+
+        # torchvision compat patch
+        import sys as _sys2
+        import torchvision.transforms.functional as _tvtf2
+        if "torchvision.transforms.functional_tensor" not in _sys2.modules:
+            _sys2.modules["torchvision.transforms.functional_tensor"] = _tvtf2
+
+        from realesrgan import RealESRGANer
+        from basicsr.archs.rrdbnet_arch import RRDBNet
+
+        logger.info("NVIDIA TensorRT ESRGAN: %dx%d -> %dx%d (quality=%s) -- %d frames",
+                    w, h, target_w, target_h, quality, n_frames)
+
+        model_trt = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                            num_block=23, num_grow_ch=32, scale=4)
+
+        tile_sizes = {"LOW": 256, "MEDIUM": 384, "HIGH": 512, "ULTRA": 640}
+        tile = tile_sizes.get(quality, 512)
+
+        upsampler = RealESRGANer(
+            scale=4,
+            model_path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+            model=model_trt,
+            tile=tile,
+            tile_pad=10,
+            pre_pad=0,
+            half=True,  # bf16/fp16 on Blackwell tensor cores
+        )
+
+        # Compile the inner model with TensorRT for NVIDIA tensor core acceleration
+        if hasattr(upsampler, 'model') and hasattr(upsampler.model, 'model'):
+            try:
+                dummy_input = torch.randn(1, 3, tile, tile).half().cuda()
+                upsampler.model.model = torch_tensorrt.compile(
+                    upsampler.model.model,
+                    inputs=[torch_tensorrt.Input(shape=dummy_input.shape, dtype=torch.float16)],
+                    enabled_precisions={torch.float16},
+                    workspace_size=1 << 30,  # 1 GB workspace
+                )
+                logger.info("TensorRT compilation successful — using NVIDIA tensor cores")
+            except Exception as trt_err:
+                logger.info("TensorRT compile skipped (%s) — using CUDA fp16 path", trt_err)
+
+        upscaled_frames = []
+        for i in range(n_frames):
+            frame = (images[i].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            frame_bgr = frame[:, :, ::-1].copy()
+            output_bgr, _ = upsampler.enhance(frame_bgr, outscale=scale)
+            output_rgb = output_bgr[:, :, ::-1].copy().astype(np.float32) / 255.0
+            upscaled_frames.append(torch.from_numpy(output_rgb))
+
+            if (i + 1) % 20 == 0 or i == n_frames - 1:
+                logger.info("  TensorRT ESRGAN progress: %d/%d frames", i + 1, n_frames)
+
+        del upsampler
+        torch.cuda.empty_cache()
+
+        result = torch.stack(upscaled_frames, dim=0)
+
+        if result.shape[1] != target_h or result.shape[2] != target_w:
+            result = torch.nn.functional.interpolate(
+                result.permute(0, 3, 1, 2),
+                size=(target_h, target_w),
+                mode="bicubic", align_corners=False,
+            ).clamp(0, 1).permute(0, 2, 3, 1)
+
+        elapsed = time.time() - t0
+        logger.info("NVIDIA TensorRT ESRGAN done in %.1fs (%.2f fps, %d frames -> %dx%d)",
+                    elapsed, n_frames / elapsed if elapsed > 0 else 0,
+                    n_frames, result.shape[2], result.shape[1])
+        return result
+
+    except ImportError:
+        logger.info("torch-tensorrt not installed. Trying standard Real-ESRGAN...")
+    except Exception as e:
+        logger.warning("TensorRT path failed: %s. Trying standard Real-ESRGAN...", e)
+
+    # --- Strategy 3: Real-ESRGAN via PyTorch CUDA (no TensorRT) ---
     try:
         # torchvision >= 0.16 removed functional_tensor; patch it before basicsr imports it
         import sys as _sys
@@ -381,7 +466,7 @@ def _upscale(images, target_resolution=1080, quality="ULTRA"):
     except Exception as e:
         logger.warning("Real-ESRGAN failed: %s. Falling back to bicubic...", e)
 
-    # --- Strategy 3: Torch bicubic (always available, lower quality) ---
+    # --- Strategy 4: Torch bicubic (always available, lower quality) ---
     logger.info("Bicubic upscale: %dx%d -> %dx%d -- %d frames", w, h, target_w, target_h, n_frames)
 
     imgs_nchw = images.permute(0, 3, 1, 2)  # NHWC -> NCHW

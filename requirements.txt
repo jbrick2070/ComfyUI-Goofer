@@ -8,6 +8,11 @@ torch>=2.0.0              # Tensor ops (already in ComfyUI)
 Pillow>=10.0.0            # CPU frame generation (already in ComfyUI)
 opencv-python>=4.8.0      # Optional: denoise/frame prep (graceful fallback)
 
+# Upscaling — NVIDIA hardware chain
+realesrgan>=0.3.0         # Real-ESRGAN upscaler (auto-downloads ~64 MB model)
+basicsr>=1.4.2            # Required by Real-ESRGAN
+torch-tensorrt>=2.2.0     # NVIDIA TensorRT acceleration (Linux/RunPod — uses tensor cores)
+
 # Prompt generation (Qwen2.5 mode) — models auto-download on first use
 transformers>=4.37.0      # Qwen2.5-Instruct + MusicGen
 accelerate>=0.26.0        # Required for Qwen2.5 float16 loading

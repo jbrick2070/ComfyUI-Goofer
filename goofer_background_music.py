@@ -9,7 +9,7 @@ Fallback     : Contextual chord-progression (additive synthesis, zero deps)
                Derives tempo / key / instrument from the same movie context.
 
 Genre/mood   : Read from goofer_prompt_gen._cached_genre_mood, populated
-               by Phi-3-mini during PromptGen while the model is loaded.
+               by Qwen2.5 during PromptGen while the model is loaded.
                Falls back to keyword-dict lookup if cache is empty.
 
 Outputs:
@@ -17,7 +17,7 @@ Outputs:
   duration_sec — FLOAT echoed back so it can wire to GooferProceduralClip's
                  'music_duration' input and keep both clips the same length.
 
-v2.2  2026-03-16  Replaced Flan-T5 genre inference with Phi-3-mini cache.
+v2.2  2026-03-16  Replaced Flan-T5 genre inference with Qwen2.5 cache.
 """
 
 import logging
@@ -27,19 +27,19 @@ import numpy as np
 log = logging.getLogger("Goofer.BackgroundMusic")
 
 
-# ─── Genre/mood cache — populated by GooferPromptGen via Phi-3-mini ──────────
-# GooferPromptGen infers genre/mood while Phi-3 is already loaded for prompt
-# generation, caches it here by title, then unloads Phi-3.  BackgroundMusic
+# ─── Genre/mood cache — populated by GooferPromptGen via Qwen2.5 ─────────────
+# GooferPromptGen infers genre/mood while Qwen is already loaded for prompt
+# generation, caches it here by title, then unloads Qwen.  BackgroundMusic
 # reads the cache so MusicGen gets a meaningful genre/mood string without
 # ever loading a second LLM.
 
 def _get_cached_genre_mood(title: str) -> str:
-    """Read Phi-3-inferred genre/mood from PromptGen's cache."""
+    """Read Qwen-inferred genre/mood from PromptGen's cache."""
     try:
         from .goofer_prompt_gen import _cached_genre_mood
         mood = _cached_genre_mood.get(title, "")
         if mood:
-            log.info("[BackgroundMusic] genre/mood from Phi-3 cache: %s", mood)
+            log.info("[BackgroundMusic] genre/mood from Qwen cache: %s", mood)
         return mood
     except Exception as exc:
         log.debug("[BackgroundMusic] genre/mood cache unavailable: %s", exc)
@@ -205,8 +205,8 @@ def _build_musicgen_prompt(movie_data: dict, goofs_data: list) -> str:
                 if len(matched_cues) >= 4:
                     break
 
-    # ── Genre/mood from Phi-3 cache (set by GooferPromptGen) ─────────────
-    # Phi-3-mini infers this while already loaded for prompt generation,
+    # ── Genre/mood from Qwen cache (set by GooferPromptGen) ──────────────
+    # Qwen2.5 infers this while already loaded for prompt generation,
     # caches by title, then unloads.  Zero extra VRAM needed here.
     title   = movie_data.get("title", "")
     ai_mood = _get_cached_genre_mood(title) if title else ""
@@ -492,7 +492,7 @@ class GooferBackgroundMusic:
                     "tooltip": (
                         "Wire PromptGen live_seed here. Value unused --"
                         "this link forces ComfyUI to run PromptGen first so the "
-                        "Phi-3 genre/mood cache is populated before MusicGen."
+                        "Qwen genre/mood cache is populated before MusicGen."
                     )
                 }),
             },

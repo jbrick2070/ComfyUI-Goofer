@@ -46,6 +46,7 @@ Advanced users can also install manually from https://github.com/comfyanonymous/
 | **LTX-Video v0.9.5** (required) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.5.safetensors) | ~9.5 GB | `ComfyUI/models/checkpoints/` |
 | **LTX-Video 13B** (optional, higher quality) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled.safetensors) | ~26 GB | `ComfyUI/models/checkpoints/` |
 | **MusicGen Large** | Auto-downloaded on first run | ~3.3 GB | HuggingFace cache |
-| **Phi-3-mini-4k-instruct** | Auto-downloaded on first run | ~4 GB | HuggingFace cache |
+| **Qwen2.5-3B-Instruct** (default AI) | Auto-downloaded on first run | ~6 GB | HuggingFace cache |
+| **Qwen2.5-7B-Instruct** (higher quality) | Auto-downloaded on first run | ~14 GB | HuggingFace cache |
 
-> MusicGen and Phi-3-mini download automatically the first time you run the workflow — no manual steps needed.
+> MusicGen and Qwen2.5 download automatically the first time you run the workflow — no manual steps needed.

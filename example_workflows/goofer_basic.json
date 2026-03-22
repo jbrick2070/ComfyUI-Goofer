@@ -233,7 +233,7 @@
                                       }
                                   ],
                       "widgets_values":  [
-                                             "Phi-3-mini"
+                                             "Qwen2.5-3B-Instruct"
                                          ],
                       "properties":  {
                                          "Node name for S\u0026R":  "GooferPromptGen"

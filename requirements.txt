@@ -8,10 +8,11 @@ torch>=2.0.0              # Tensor ops (already in ComfyUI)
 Pillow>=10.0.0            # CPU frame generation (already in ComfyUI)
 opencv-python>=4.8.0      # Optional: denoise/frame prep (graceful fallback)
 
-# Prompt generation (Phi-3-mini mode) — models auto-download on first use
-transformers>=5.0.0       # Phi-3-mini-4k-instruct + MusicGen (native Phi-3 support)
-accelerate>=0.26.0        # Required for Phi-3-mini float16 loading
+# Prompt generation (Qwen2.5 mode) — models auto-download on first use
+transformers>=4.37.0      # Qwen2.5-Instruct + MusicGen
+accelerate>=0.26.0        # Required for Qwen2.5 float16 loading
 
 # Models downloaded automatically — no manual steps needed:
-#   microsoft/Phi-3-mini-4k-instruct  ~4 GB  (AI prompt generation + genre/mood)
+#   Qwen/Qwen2.5-3B-Instruct          ~6 GB  (AI prompt generation, default)
+#   Qwen/Qwen2.5-7B-Instruct         ~14 GB  (AI prompt generation, higher quality)
 #   facebook/musicgen-large           ~3.3 GB (film score generation)

@@ -1,11 +1,15 @@
 """
 GooferPromptGen -- Converts sanitized goofs into cinematic video prompts.
 
-Two modes:
-  Template   -- Fast, deterministic, no extra model. Category-aware templates.
-  Phi-3-mini -- microsoft/Phi-3-mini-4k-instruct generates richer AI prompts.
-                Auto-downloads ~4 GB first use. Unloads VRAM after generation
-                so LTX-Video has full headroom. NSFW refusal baked in.
+Three modes:
+  Template        -- Fast, deterministic, no extra model. Category-aware templates.
+  Qwen2.5-3B     -- Qwen/Qwen2.5-3B-Instruct generates richer AI prompts.
+                    Auto-downloads ~6 GB first use. Unloads VRAM after generation
+                    so LTX-Video has full headroom.
+  Qwen2.5-7B     -- Qwen/Qwen2.5-7B-Instruct for higher quality prompts.
+                    Auto-downloads ~14 GB. Better quality, more VRAM.
+
+Uses the same Qwen lazy-load/unload pattern as ComfyUI-UCLA-News-Video.
 
 Author: Jeffrey A. Brick
 """
@@ -16,57 +20,76 @@ import time
 
 log = logging.getLogger("Goofer.PromptGen")
 
-# Shared genre/mood cache — populated by generate_prompts() while Phi-3 is
+# Shared genre/mood cache — populated by generate_prompts() while Qwen is
 # loaded, then read by GooferBackgroundMusic to build the MusicGen prompt.
-# Keyed by movie title string.  Replaces Flan-T5 genre inference entirely.
+# Keyed by movie title string.
 _cached_genre_mood: dict = {}
 
 
-# -- Phi-3-mini lazy loader ----------------------------------------------------
-_phi3_model = None
-_phi3_tok   = None
+# -- Qwen lazy loader (same pattern as UCLA News Video) ------------------------
+_qwen_model = None
+_qwen_tok   = None
+_qwen_loaded_id = None
 
 
-def _get_phi3():
-    """Lazy-load microsoft/Phi-3-mini-4k-instruct in float16."""
-    global _phi3_model, _phi3_tok
-    if _phi3_model is not None:
-        return _phi3_model, _phi3_tok
+def _get_qwen(model_id):
+    """Lazy-load a Qwen2.5-Instruct model in float16 on CUDA."""
+    global _qwen_model, _qwen_tok, _qwen_loaded_id
+
+    # If the requested model is already loaded, reuse it
+    if _qwen_model is not None and _qwen_loaded_id == model_id:
+        return _qwen_model, _qwen_tok
+
+    # If a different model is loaded, unload it first
+    if _qwen_model is not None:
+        _unload_qwen()
+
     try:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        model_id = "microsoft/Phi-3-mini-4k-instruct"
-        log.info("[PromptGen] Loading Phi-3-mini (~4 GB first run)...")
-        _phi3_tok = AutoTokenizer.from_pretrained(model_id)
-        _phi3_model = AutoModelForCausalLM.from_pretrained(
+
+        log.info("[PromptGen] Loading %s ...", model_id)
+        print(f"[Goofer] Loading {model_id} (first run downloads model)...")
+
+        _qwen_tok = AutoTokenizer.from_pretrained(model_id)
+        _qwen_model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            torch_dtype=torch.float16,  # native transformers 5.0 Phi-3 support
+            dtype=torch.float16,
         ).to("cuda").eval()
+
+        _qwen_loaded_id = model_id
+        log.info("[PromptGen] %s loaded on CUDA", model_id)
+        print(f"[Goofer] {model_id} loaded on CUDA")
     except Exception as exc:
-        log.exception("[PromptGen] Phi-3-mini failed to load -- Template mode.")
-        _phi3_model = None
-        _phi3_tok   = None
-    return _phi3_model, _phi3_tok
+        log.exception("[PromptGen] %s failed to load — Template mode.", model_id)
+        print(f"[Goofer] Qwen load failed: {exc}")
+        _qwen_model = None
+        _qwen_tok   = None
+        _qwen_loaded_id = None
+
+    return _qwen_model, _qwen_tok
 
 
-def _unload_phi3():
+def _unload_qwen():
     """Free VRAM after prompts are done so LTX-Video has full headroom."""
-    global _phi3_model, _phi3_tok
-    if _phi3_model is None:
+    global _qwen_model, _qwen_tok, _qwen_loaded_id
+    if _qwen_model is None:
         return
     try:
         import torch
-        del _phi3_model, _phi3_tok
-        _phi3_model = None
-        _phi3_tok   = None
+        del _qwen_model, _qwen_tok
+        _qwen_model = None
+        _qwen_tok   = None
+        _qwen_loaded_id = None
         torch.cuda.empty_cache()
-        log.info("[PromptGen] Phi-3-mini unloaded from VRAM.")
+        log.info("[PromptGen] Qwen unloaded from VRAM.")
+        print("[Goofer] Qwen unloaded from VRAM")
     except Exception as exc:
-        log.debug("[PromptGen] Phi-3 unload: %s", exc)
+        log.debug("[PromptGen] Qwen unload: %s", exc)
 
 
 # NSFW refusal + quality rules baked into system prompt
-_PHI3_SYSTEM = (
+_QWEN_SYSTEM = (
     "You are a professional film director writing text-to-video prompts for an AI "
     "video model. Your prompts describe short 5-second cinematic scenes. "
     "Rules you must always follow:\n"
@@ -90,7 +113,7 @@ _HIGHLIGHT_STYLES = [
     "A dramatic cinematic camera push-in isolates the mistake as the rest of the frame darkens."
 ]
 
-_PHI3_USER_TMPL = (
+_QWEN_USER_TMPL = (
     "Film goof category: {category}\n"
     "Goof description: {description}\n\n"
     "Write a cinematic 5-second text-to-video prompt that explicitly and visually recreates this exact film mistake. "
@@ -99,17 +122,18 @@ _PHI3_USER_TMPL = (
     "Visual style: {style}."
 )
 
-_PHI3_BAD = ["i cannot", "i can't", "i'm sorry", "i apologize", "as an ai"]
+_BAD_OUTPUTS = ["i cannot", "i can't", "i'm sorry", "i apologize", "as an ai",
+                "here is", "here's the", "sure,", "certainly", "of course"]
 
 
-def _phi3_prompt(model, tok, category: str, description: str, style: str, highlight: str) -> str:
-    """Generate one LTX-Video prompt via Phi-3-mini. Returns '' on failure."""
+def _qwen_prompt(model, tok, category: str, description: str, style: str, highlight: str) -> str:
+    """Generate one LTX-Video prompt via Qwen2.5. Returns '' on failure."""
     import torch
-    msg = _PHI3_USER_TMPL.format(
+    msg = _QWEN_USER_TMPL.format(
         category=category, description=description[:300], style=style, highlight=highlight
     )
     messages = [
-        {"role": "system", "content": _PHI3_SYSTEM},
+        {"role": "system", "content": _QWEN_SYSTEM},
         {"role": "user",   "content": msg},
     ]
     text   = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -126,31 +150,35 @@ def _phi3_prompt(model, tok, category: str, description: str, style: str, highli
     new_tok = out[0][inputs["input_ids"].shape[1]:]
     result  = tok.decode(new_tok, skip_special_tokens=True).strip()
 
+    # Strip wrapping quotes
+    if result.startswith('"') and result.endswith('"'):
+        result = result[1:-1].strip()
+
     if len(result.split()) < 10:
-        log.warning("[PromptGen] Phi-3 output too short, using template fallback.")
+        log.warning("[PromptGen] Qwen output too short, using template fallback.")
         return ""
-    if any(b in result.lower() for b in _PHI3_BAD):
-        log.warning("[PromptGen] Phi-3 refusal/bad output detected, using template fallback.")
+    if any(b in result.lower()[:60] for b in _BAD_OUTPUTS):
+        log.warning("[PromptGen] Qwen refusal/bad output detected, using template fallback.")
         return ""
     return result
 
 
-# -- Phi-3 genre/mood inference (runs while Phi-3 is already loaded) -----------
+# -- Qwen genre/mood inference (runs while Qwen is already loaded) -------------
 
-_PHI3_GENRE_SYSTEM = (
+_GENRE_SYSTEM = (
     "You are a film music supervisor. Given a film plot, describe the ideal "
     "musical genre and mood in exactly 6-10 words. "
     "Output ONLY the description — no explanation, no punctuation at the end."
 )
 
-_PHI3_GENRE_BAD = [
+_GENRE_BAD = [
     "directed by", "written by", "starring", "based on",
     "released in", "produced by", "i cannot", "i can't",
 ]
 
 
-def _infer_phi3_genre_mood(model, tok, title: str, plot: str) -> str:
-    """Ask Phi-3-mini for a genre/mood description to drive MusicGen.
+def _infer_genre_mood(model, tok, title: str, plot: str) -> str:
+    """Ask Qwen2.5 for a genre/mood description to drive MusicGen.
 
     Returns a string like 'suspenseful orchestral thriller with dark piano'
     or '' if inference fails or plot is too short.
@@ -160,7 +188,7 @@ def _infer_phi3_genre_mood(model, tok, title: str, plot: str) -> str:
         return ""
     try:
         messages = [
-            {"role": "system", "content": _PHI3_GENRE_SYSTEM},
+            {"role": "system", "content": _GENRE_SYSTEM},
             {"role": "user",   "content": f"Film plot: {plot[:400]}"},
         ]
         text   = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -174,15 +202,15 @@ def _infer_phi3_genre_mood(model, tok, title: str, plot: str) -> str:
         result  = tok.decode(new_tok, skip_special_tokens=True).strip()
 
         if len(result.split()) < 4:
-            log.warning("[PromptGen] Phi-3 genre output too short: %s", result)
+            log.warning("[PromptGen] Qwen genre output too short: %s", result)
             return ""
-        if any(b in result.lower() for b in _PHI3_GENRE_BAD):
-            log.warning("[PromptGen] Phi-3 genre hallucination discarded: %s", result)
+        if any(b in result.lower() for b in _GENRE_BAD):
+            log.warning("[PromptGen] Qwen genre hallucination discarded: %s", result)
             return ""
-        log.info("[PromptGen] Phi-3 genre/mood for '%s': %s", title, result)
+        log.info("[PromptGen] Qwen genre/mood for '%s': %s", title, result)
         return result
     except Exception as exc:
-        log.debug("[PromptGen] Phi-3 genre inference failed: %s", exc)
+        log.debug("[PromptGen] Qwen genre inference failed: %s", exc)
         return ""
 
 
@@ -307,12 +335,21 @@ def _template_prompt(rng, category: str, description: str, style_prefix: str) ->
     return f"{style_prefix} {scene}".strip()
 
 
+# ── Model size → HuggingFace ID mapping ──────────────────────────────
+
+_MODEL_MAP = {
+    "Qwen2.5-3B-Instruct": "Qwen/Qwen2.5-3B-Instruct",
+    "Qwen2.5-7B-Instruct": "Qwen/Qwen2.5-7B-Instruct",
+}
+
+
 class GooferPromptGen:
     """Converts sanitized goofs into 5 cinematic video prompts.
 
-    prompt_mode = Template  : fast, no extra model, category-aware templates.
-    prompt_mode = Phi-3-mini: richer AI-written prompts. Unloads after generation.
-    NSFW content refused in both modes.
+    prompt_mode = Template          : fast, no extra model, category-aware templates.
+    prompt_mode = Qwen2.5-3B-Instruct : AI-written prompts (~6 GB VRAM).
+    prompt_mode = Qwen2.5-7B-Instruct : higher quality (~14 GB VRAM).
+    Unloads after generation. NSFW content refused in all modes.
     """
 
     CATEGORY     = "Goofer"
@@ -330,31 +367,39 @@ class GooferPromptGen:
                 "movie_data": ("GOOFER_MOVIE",),
             },
             "optional": {
-                "prompt_mode": (["Template", "Phi-3-mini"], {
-                    "default": "Phi-3-mini",
+                "prompt_mode": (["Template", "Qwen2.5-3B-Instruct", "Qwen2.5-7B-Instruct"], {
+                    "default": "Qwen2.5-3B-Instruct",
                     "tooltip": (
                         "Template: fast, no extra model. "
-                        "Phi-3-mini: AI-written prompts via microsoft/Phi-3-mini-4k-instruct "
-                        "(~4 GB first download, unloads before LTX-Video). "
-                        "NSFW refused in both modes."
+                        "Qwen2.5-3B: AI-written prompts (~6 GB VRAM, faster). "
+                        "Qwen2.5-7B: higher quality (~14 GB VRAM). "
+                        "Models auto-download first use, unload before LTX-Video."
                     ),
+                }),
+                "unload_after": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Free VRAM after generation. Disable if chaining multiple prompt nodes.",
                 }),
             },
         }
 
-    def generate_prompts(self, config, goofs_data, movie_data, prompt_mode="Phi-3-mini"):
+    def generate_prompts(self, config, goofs_data, movie_data,
+                         prompt_mode="Qwen2.5-3B-Instruct", unload_after=True):
         base_seed    = config["seed"]
         live_seed    = base_seed ^ (int(time.time()) & 0xFFFFFFFF)
         style_key    = config.get("visual_style", "noir_cinematic")
         style_prefix = _STYLE_PREFIXES.get(style_key, "")
         style_name   = style_key.replace("_", " ")
 
-        phi3_model = phi3_tok = None
-        if prompt_mode == "Phi-3-mini":
-            phi3_model, phi3_tok = _get_phi3()
-            if phi3_model is None:
-                log.warning("[PromptGen] Phi-3-mini unavailable -- using Template mode.")
-                prompt_mode = "Template"
+        qwen_model = qwen_tok = None
+        using_ai = prompt_mode in _MODEL_MAP
+
+        if using_ai:
+            model_id = _MODEL_MAP[prompt_mode]
+            qwen_model, qwen_tok = _get_qwen(model_id)
+            if qwen_model is None:
+                log.warning("[PromptGen] %s unavailable — using Template mode.", prompt_mode)
+                using_ai = False
 
         prompts = []
         for i, goof in enumerate(goofs_data[:5]):
@@ -362,11 +407,10 @@ class GooferPromptGen:
             category    = goof.get("category", "Miscellaneous")
             description = goof.get("description", "a filmmaking error")
 
-            if prompt_mode == "Phi-3-mini":
+            if using_ai:
                 highlight = rng.choice(_HIGHLIGHT_STYLES)
-                result = _phi3_prompt(phi3_model, phi3_tok, category, description, style_name, highlight)
+                result = _qwen_prompt(qwen_model, qwen_tok, category, description, style_name, highlight)
                 if not result:
-                    # Template fallback if Phi-3 output is bad or refused
                     result = _template_prompt(rng, category, description, style_prefix)
             else:
                 result = _template_prompt(rng, category, description, style_prefix)
@@ -375,20 +419,20 @@ class GooferPromptGen:
             log.info("[PromptGen] goof %d [%s] (%s): %s...",
                      i + 1, category, prompt_mode, result[:80])
 
-        # While Phi-3 is still loaded, infer genre/mood for BackgroundMusic.
+        # While Qwen is still loaded, infer genre/mood for BackgroundMusic.
         # Store in _cached_genre_mood so BackgroundMusic can read it without
-        # re-loading Phi-3 (avoids VRAM conflict with LTX-Video + MusicGen).
-        if prompt_mode == "Phi-3-mini" and phi3_model is not None:
+        # re-loading Qwen (avoids VRAM conflict with LTX-Video + MusicGen).
+        if using_ai and qwen_model is not None:
             title = movie_data.get("title", "")
             plot  = movie_data.get("plot",  "")
             if title and title not in _cached_genre_mood:
-                gm = _infer_phi3_genre_mood(phi3_model, phi3_tok, title, plot)
+                gm = _infer_genre_mood(qwen_model, qwen_tok, title, plot)
                 if gm:
                     _cached_genre_mood[title] = gm
 
-        # Unload Phi-3 so LTX-Video gets full VRAM
-        if prompt_mode == "Phi-3-mini":
-            _unload_phi3()
+        # Unload Qwen so LTX-Video gets full VRAM
+        if using_ai and unload_after:
+            _unload_qwen()
 
         while len(prompts) < 5:
             prompts.append("")

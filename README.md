@@ -45,10 +45,11 @@ Advanced users can also install manually from https://github.com/comfyanonymous/
 |-------|----------|------|---------|
 | **LTX-Video v0.9.5** (required) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.5.safetensors) | ~9.5 GB | `ComfyUI/models/checkpoints/` |
 | **LTX-Video 13B** (optional, higher quality) | [HuggingFace](https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled.safetensors) | ~26 GB | `ComfyUI/models/checkpoints/` |
+| **Qwen2.5-3B-Instruct** (default AI) | Auto-downloaded on first run | ~6 GB | HuggingFace cache |
+| **Qwen2.5-7B-Instruct** (optional, higher quality) | Auto-downloaded on first run | ~14 GB | HuggingFace cache |
 | **MusicGen Large** | Auto-downloaded on first run | ~3.3 GB | HuggingFace cache |
-| **Flan-T5-small** | Auto-downloaded on first run | ~80 MB | HuggingFace cache |
 
-> MusicGen and Flan-T5 download automatically the first time you run the workflow — no manual steps needed.
+> Qwen2.5 and MusicGen download automatically the first time you run the workflow — no manual steps needed.
 
 ### Step 3 — Install ComfyUI-Goofer
 
@@ -69,8 +70,17 @@ pip install cinemagoer requests transformers torch
 
 ### Step 4 — Load the Workflow
 
+Goofer ships with two workflow presets:
+
+| Workflow | Target | Hardware | File |
+|----------|--------|----------|------|
+| **Basic** | Local Windows | RTX 5080 / 4090 | `example_workflows/goofer_basic.json` |
+| **Blackwell RunPod** | RunPod Linux | RTX PRO 4500 (Blackwell) | `example_workflows/goofer_blackwell_runpod.json` |
+
+Both workflows use the same node pipeline and produce identical output. The Blackwell variant is optimized for RunPod Linux with 175-frame clips (5 seconds at 35 FPS), TensorRT-accelerated NVIDIA upscaling via tensor cores, and high-performance text encoding.
+
 1. Open ComfyUI at `http://127.0.0.1:8000`
-2. Click **Load** and select `example_workflows/goofer_basic.json`
+2. Click **Load** and select the workflow for your environment
 3. If any nodes appear red: **Manager → Install Missing Custom Nodes → Restart**
 4. Hit **Queue** — Goofer picks a random movie and starts generating
 
@@ -78,7 +88,8 @@ pip install cinemagoer requests transformers torch
 
 | Setup | GPU | VRAM |
 |-------|-----|------|
-| Recommended | RTX 5080 / 4090 | 16 GB+ |
+| Recommended (local) | RTX 5080 / 4090 | 16 GB+ |
+| Recommended (cloud) | RTX PRO 4500 Blackwell (RunPod) | 24 GB+ |
 | Minimum | RTX 4070 / 3060 | 8 GB |
 
 > **Check your VRAM:** Windows: Task Manager (Ctrl+Shift+Esc) → Performance → GPU → Dedicated GPU Memory. Linux: `nvidia-smi`
@@ -115,11 +126,11 @@ GooferBatchVideo                                  │
 | **GooferInit** | Sets global config: output path, upscale mode, seed |
 | **GooferGoofFetch** | Picks a random film from 424 titles, fetches goofs from IMDb via Cinemagoer + direct HTTP fallback. Seed-diversified so every run draws a fresh subset from the full goof pool |
 | **GooferSanitizer** *(Copyright Cleaner)* | Strips copyrighted names, brands, and franchises. Now includes the robust **Banana Filter** which humorously intercepts and replaces all firearms, heavy weaponry, and violent verbs with bananas before reaching any AI model |
-| **GooferPromptGen** | Converts sanitized goofs into cinematic LTX-2 prompts. v1.1 forces the exact mistake to be the central focal point of the scene and dynamically injects cinematic tracking/lighting highlight styles to explicitly point out the error |
+| **GooferPromptGen** | Converts sanitized goofs into cinematic LTX-2 prompts via Qwen2.5 (3B default, 7B optional). Forces the exact mistake to be the central focal point of the scene and dynamically injects cinematic tracking/lighting highlight styles to explicitly point out the error. Lazy-loads and unloads the model to free VRAM before video generation |
 | **GooferBatchVideo** | Feeds each prompt to LTX-Video and renders one video clip per goof. v1.1 defaults to native 16:9 output at `1024x576`, alongside configurable frame counts and guidance strengths |
 | **GooferBackgroundMusic** | Generates a film score with Meta MusicGen 3. Prompt is derived from actual goof keywords (explosions → percussive bass, chases → driving rhythm, basketball → upbeat brass, etc.) plus Flan-T5-small genre/mood inference from the film's plot. Falls back to additive-synthesis chord progression if MusicGen is unavailable |
 | **GooferProceduralClip** | Renders a data-viz interstitial showing goof metadata as animated neon graphics. Duration syncs to the MusicGen output length via the `music_duration` input |
-| **GooferVideoConcat** *(Stitch + Upscale)* | Concatenates up to 6 VIDEO clips with optional crossfade dissolve transitions. 3-tier upscaler: nvvfx RTX VSR (primary, hardware-accelerated), Real-ESRGAN (fallback, auto-downloads ~64 MB model), bicubic (last resort). Default target: 1080p |
+| **GooferVideoConcat** *(Stitch + Upscale)* | Concatenates up to 6 VIDEO clips with optional crossfade dissolve transitions. 4-tier upscaler: nvvfx RTX VSR (Windows), TensorRT-accelerated Real-ESRGAN (Linux/RunPod — NVIDIA tensor cores), standard Real-ESRGAN (fallback), bicubic (last resort). Default target: 1080p |
 | **GooferAudioEnhance** | Optional EQ / loudness normalization pass on the final audio mix |
 
 ---
@@ -245,15 +256,23 @@ This filter cannot be disabled from the workflow UI. The only override is editin
 
 ```
 cinemagoer
-requests
-transformers>=4.40.0
+transformers>=4.37.0
+accelerate>=0.26.0
 torch>=2.0.0
 numpy
+Pillow>=10.0.0
+opencv-python>=4.8.0
 ```
 
-Optional (for Real-ESRGAN upscaling fallback — auto-downloads model weights on first run):
+For NVIDIA upscaling (recommended):
 ```
-realesrgan
+realesrgan>=0.3.0
+basicsr>=1.4.2
+```
+
+For RunPod / Linux Blackwell (TensorRT tensor core acceleration):
+```
+torch-tensorrt>=2.2.0
 ```
 
 Optional (for higher-quality audio resampling):

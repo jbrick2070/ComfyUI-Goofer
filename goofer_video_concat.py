@@ -37,7 +37,7 @@ REQUIRED_KEYS = {"images", "audio", "fps"}
 
 def _extract_components(video_obj):
     """Pull (images_tensor, audio_obj, fps) from a VIDEO / VideoFromComponents."""
-    fps = 30.0
+    fps = 35.0
 
     if hasattr(video_obj, "get_components"):
         components = video_obj.get_components()
@@ -94,7 +94,7 @@ def _extract_components(video_obj):
         if images is None:
             images = video_obj.get("frames")
         audio = video_obj.get("audio")
-        fps = float(video_obj.get("fps", 30.0))
+        fps = float(video_obj.get("fps", 35.0))
         if images is not None:
             return images, audio, fps
 
@@ -689,7 +689,7 @@ class GooferVideoConcat:
 
         all_images = []
         all_audio = []
-        fps = 30.0
+        fps = 35.0
 
         for i, clip in enumerate(clips):
             images, audio, clip_fps = _extract_components(clip)

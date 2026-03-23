@@ -1,4 +1,4 @@
-﻿"""
+"""
 ComfyUI-Goofer â€” Movie Goof Video Generator
 
 Finds IMDB-style goofs in a movie, generates copyright-safe video prompts,

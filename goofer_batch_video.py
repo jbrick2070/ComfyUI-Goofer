@@ -322,8 +322,7 @@ class GooferBatchVideo:
         cond_strength_1=0.75, cond_strength_2=0.75, cond_strength_3=0.75,
         cond_strength_4=0.75, cond_strength_5=0.75,
     ):
-        import time as _t
-        seed = int(_t.time()) % 0xFFFFFFFF   # fresh seed every run
+        seed = int(time.time_ns()) % 0xFFFFFFFF   # nanosecond-precision seed
         cfg = 1.0                             # distilled LTX-2: always 1.0
         batch_size = 5
         tile_size = 512

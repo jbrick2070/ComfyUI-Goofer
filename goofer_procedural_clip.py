@@ -477,8 +477,10 @@ class GooferProceduralClip:
             "goof_num": _font(int(60 * s)),
         }
 
-        # Deterministic particles
-        rng = random.Random(config.get("seed", 42))
+        # Deterministic particles — derive a visual seed so procedural
+        # animations vary even when the base config seed is reused quickly.
+        _visual_seed = config.get("seed", 42) ^ (int(time.time_ns()) & 0xFFFFFFFF)
+        rng = random.Random(_visual_seed)
         particles = [
             {
                 "x": rng.random(), "y": rng.random(),
@@ -493,7 +495,7 @@ class GooferProceduralClip:
         # Cellular automata
         ca_cols = max(16, width // 24)
         ca_rows = max(12, height // 24)
-        ca = _CellularAutomata(ca_cols, ca_rows, seed=config.get("seed", 42))
+        ca = _CellularAutomata(ca_cols, ca_rows, seed=_visual_seed)
 
         # Fractal accents
         fractal_top = _mandelbrot_line(0.35, 0.0, 1.0, steps=width // 4)

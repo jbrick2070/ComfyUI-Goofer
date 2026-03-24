@@ -386,7 +386,7 @@ class GooferPromptGen:
     def generate_prompts(self, config, goofs_data, movie_data,
                          prompt_mode="Qwen2.5-3B-Instruct", unload_after=True):
         base_seed    = config["seed"]
-        live_seed    = base_seed ^ (int(time.time()) & 0xFFFFFFFF)
+        live_seed    = base_seed ^ (int(time.time_ns()) & 0xFFFFFFFF)
         style_key    = config.get("visual_style", "noir_cinematic")
         style_prefix = _STYLE_PREFIXES.get(style_key, "")
         style_name   = style_key.replace("_", " ")

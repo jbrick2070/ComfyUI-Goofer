@@ -607,13 +607,13 @@ class GooferGoofFetch:
 
         # ── Random movie selection ──
         if config.get("random_movie", False):
-            entry = random.choice(_RANDOM_MOVIE_POOL)
+            rng_movie = random.Random(int(time.time_ns()))
+            entry = rng_movie.choice(_RANDOM_MOVIE_POOL)
             title, year = entry[0], entry[1]
             log.info("[GoofFetch] Random movie: '%s' (%d)", title, year)
             # When random_movie is on, also randomize which goofs are picked
             # so every run draws a genuinely different set from the pool.
-            import time as _time
-            seed = int(_time.time()) % (2 ** 31)
+            seed = int(time.time_ns()) % (2 ** 31)
         else:
             title = config["movie_title"]
             year = config["movie_year"]

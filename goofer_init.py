@@ -8,6 +8,7 @@ Author: Jeffrey A. Brick
 """
 
 import time
+import secrets
 
 
 class GooferInit:
@@ -75,7 +76,7 @@ class GooferInit:
             "movie_year": int(movie_year),
             "max_goofs": int(max_goofs),
             "visual_style": visual_style,
-            "seed": int(time.time()) % 2**32,
+            "seed": secrets.randbits(32),
             "random_movie": bool(random_movie),
             "timestamp": time.time(),
         }

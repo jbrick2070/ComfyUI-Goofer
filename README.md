@@ -221,8 +221,8 @@ Run Goofer as a live generative broadcast — each output video auto-loads into 
 
 - [OBS Studio](https://obsproject.com/download)
 - [Python 3.11.x](https://www.python.org/downloads/release/python-3119/)
-- [Media Playlist Source Plugin](https://obsproject.com/forum/resources/media-playlist-source.1524/)
-- [Directory Sorter for OBS Script](https://obsproject.com/forum/resources/directory-watch-media-sorter.1767/)
+- [Media Playlist Source (OBS Plugin)](https://obsproject.com/forum/resources/media-playlist-source.1765/)
+- [Directory Sorter for OBS](https://github.com/CodeYan01/directory_sorter_for_obs)
 
 ### Setup
 
